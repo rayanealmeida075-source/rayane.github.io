@@ -112,7 +112,7 @@
 
     <!-- Campo para inserir o Link do CSV da Planilha -->
     <div class="controls">
-        <input type="text" id="csvUrl" placeholder="Cole o Link do CSV Publicado da sua Planilha aqui...">
+        <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Cole o Link do CSV Publicado da sua Planilha aqui...">
         <button onclick="carregarDados()">Carregar Dados</button>
     </div>
 
@@ -145,23 +145,34 @@
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
+        let timerAtualizacao = null;
 
         function carregarDados() {
-            const url = document.getElementById('csvUrl').value.trim();
+            let url = document.getElementById('csvUrl').value.trim();
             if (!url) {
                 alert('Por favor, insira a URL do arquivo CSV publicado.');
                 return;
             }
 
-            Papa.parse(url, {
+            // Garante que o link usa o formato CSV
+            if (url.includes('pubhtml')) {
+                url = url.replace('pubhtml', 'pub') + '&output=csv';
+            }
+
+            // Adiciona timestamp para desativar o cache do navegador
+            const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
+
+            Papa.parse(urlSemCache, {
                 download: true,
                 header: true,
                 skipEmptyLines: true,
                 complete: function(results) {
-                    processarDados(results.data);
+                    if (results.data && results.data.length > 0) {
+                        processarDados(results.data);
+                    }
                 },
                 error: function(err) {
-                    alert('Erro ao carregar os dados. Verifique o link e se a planilha foi publicada como CSV.');
+                    console.error('Erro ao carregar os dados:', err);
                 }
             });
         }
@@ -185,7 +196,7 @@
                 acelY.push(y);
                 acelZ.push(z);
 
-                if (z > maxZ) maxZ = z;
+                if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
                 if (row['Status']) ultimoStatus = row['Status'];
             });
 
@@ -215,6 +226,7 @@
                 },
                 options: {
                     responsive: true,
+                    animation: false, // Desativa animação para transição suave em updates
                     plugins: {
                         title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
                         legend: { labels: { color: '#CBD5E1' } }
@@ -270,6 +282,7 @@
                 },
                 options: {
                     responsive: true,
+                    animation: false,
                     plugins: {
                         title: { display: true, text: '2. Espectro de Frequência - Eixo X (FFT)', color: '#F8FAFC' },
                         legend: { display: false }
@@ -281,6 +294,12 @@
                 }
             });
         }
+
+        // Executa o carregamento inicial ao abrir a página
+        carregarDados();
+
+        // Atualiza os dados automaticamente a cada 10 segundos
+        setInterval(carregarDados, 10000);
     </script>
 </body>
 </html>
