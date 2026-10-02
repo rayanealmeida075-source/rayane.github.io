@@ -110,17 +110,15 @@
         ⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES
     </div>
 
-    <!-- Campo para inserir o Link do CSV da Planilha -->
     <div class="controls">
         <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Cole o Link do CSV Publicado da sua Planilha aqui...">
         <button onclick="carregarDados()">Carregar Dados</button>
     </div>
 
-    <!-- Indicadores KPI -->
     <div class="kpi-container">
         <div class="kpi-card" style="border-color: #3B82F6;">
             <div class="kpi-title">ÚLTIMO STATUS</div>
-            <div class="kpi-value" id="kpiStatus">--</div>
+            <div class="kpi-value" id="kpiStatus">A carregar...</div>
         </div>
         <div class="kpi-card" style="border-color: #10B981;">
             <div class="kpi-title">MAGNITUDE MÁX. Z (g)</div>
@@ -132,7 +130,6 @@
         </div>
     </div>
 
-    <!-- Seção dos Gráficos -->
     <div class="charts-grid">
         <div class="chart-card">
             <canvas id="chartAceleracao"></canvas>
@@ -145,7 +142,6 @@
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
-        let maiorTotalLeituras = 0;
 
         function converterNumero(val) {
             if (!val) return 0;
@@ -156,10 +152,7 @@
 
         function carregarDados() {
             let urlInput = document.getElementById('csvUrl').value.trim();
-            if (!urlInput) {
-                alert('Por favor, insira a URL do arquivo CSV publicado.');
-                return;
-            }
+            if (!urlInput) return;
 
             let url = urlInput;
             if (url.includes('pubhtml')) {
@@ -168,28 +161,22 @@
 
             const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
 
-            fetch(urlSemCache, { cache: "no-store" })
-                .then(res => res.text())
-                .then(csvTexto => {
-                    Papa.parse(csvTexto, {
-                        header: true,
-                        skipEmptyLines: true,
-                        complete: function(results) {
-                            if (results.data && results.data.length > 0) {
-                                processarDados(results.data);
-                            }
-                        }
-                    });
-                })
-                .catch(err => console.error('Erro ao buscar dados:', err));
+            Papa.parse(urlSemCache, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processarDados(results.data);
+                    }
+                },
+                error: function(err) {
+                    console.error('Erro ao ler CSV com PapaParse:', err);
+                }
+            });
         }
 
         function processarDados(data) {
-            if (data.length < maiorTotalLeituras) {
-                return;
-            }
-            maiorTotalLeituras = data.length;
-
             let rotulos = [];
             let magX = [];
             let magY = [];
@@ -199,7 +186,6 @@
             let maxZ = 0;
 
             data.forEach((row, idx) => {
-                // Busca as chaves da linha ignorando maiúsculas/minúsculas e espaços
                 let chaves = Object.keys(row);
                 let keyTempo = chaves.find(k => k.toLowerCase().includes('tempo')) || chaves[0];
                 let keyMagX = chaves.find(k => k.toLowerCase().includes('mag x')) || chaves[2];
@@ -291,7 +277,7 @@
         }
 
         carregarDados();
-        setInterval(carregarDados, 10000);
+        setInterval(carregarDados, 5000);
     </script>
 </body>
 </html>
