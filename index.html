@@ -153,7 +153,6 @@
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
-        let totalLeiturasAcumuladas = 0; // Controla o total acumulado para impedir oscilação para baixo
 
         // Inicializa a estrutura dos gráficos no carregamento da página
         function inicializarGraficos() {
@@ -215,16 +214,12 @@
                 return;
             }
 
-            // Normaliza a URL para garantir que baixe o formato CSV direto
             if (url.includes('pubhtml')) {
-                url = url.replace('pubhtml', 'pub');
-            }
-            if (!url.includes('output=csv')) {
-                url += (url.includes('?') ? '&' : '?') + 'output=csv';
+                url = url.replace('pubhtml', 'pub') + '&output=csv';
             }
 
-            // Garante que o navegador recarregue o CSV sem usar cache
-            const urlSemCache = url + '&_t=' + new Date().getTime();
+            // Garante que o navegador recarregue o CSV sem usar cache antigo
+            const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
 
             Papa.parse(urlSemCache, {
                 download: true,
@@ -232,12 +227,8 @@
                 skipEmptyLines: true,
                 complete: function(results) {
                     if (results.data && results.data.length > 0) {
-                        // REGRA PRINCIPAL: só atualiza se a nova leitura for maior ou igual ao total acumulado
-                        if (results.data.length >= totalLeiturasAcumuladas) {
-                            totalLeiturasAcumuladas = results.data.length;
-                            processarDados(results.data);
-                            document.getElementById('lastUpdate').innerText = 'Última atualização: ' + new Date().toLocaleTimeString();
-                        }
+                        processarDados(results.data);
+                        document.getElementById('lastUpdate').innerText = 'Última atualização: ' + new Date().toLocaleTimeString();
                     }
                 },
                 error: function(err) {
@@ -274,12 +265,12 @@
             document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
             document.getElementById('kpiLeituras').innerText = data.length.toLocaleString('pt-BR');
 
-            // Atualização contínua do gráfico de aceleração
+            // Atualização contínua do gráfico de aceleração (sem destroy)
             chartAcelInstance.data.labels = tempos;
             chartAcelInstance.data.datasets[0].data = acelX;
             chartAcelInstance.data.datasets[1].data = acelY;
             chartAcelInstance.data.datasets[2].data = acelZ;
-            chartAcelInstance.update('none');
+            chartAcelInstance.update('none'); // Modo 'none' atualiza sem animações bruscas
 
             // Atualização do gráfico de FFT
             atualizarFFT(acelX, tempos);
@@ -323,7 +314,7 @@
         // 2. Executa a primeira busca de dados
         carregarDados();
 
-        // 3. Atualiza os dados a cada 5 segundos
+        // 3. Atualiza os dados a cada 5 segundos (5000 ms)
         setInterval(carregarDados, 5000);
     </script>
 </body>
