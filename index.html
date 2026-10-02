@@ -78,6 +78,7 @@
             margin-bottom: 20px;
             display: flex;
             gap: 10px;
+            align-items: center;
         }
 
         input[type="text"] {
@@ -102,6 +103,12 @@
         button:hover {
             background-color: #2563EB;
         }
+
+        .status-badge {
+            font-size: 0.85rem;
+            color: #10B981;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
@@ -113,7 +120,8 @@
     <!-- Campo para inserir o Link do CSV da Planilha -->
     <div class="controls">
         <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Cole o Link do CSV Publicado da sua Planilha aqui...">
-        <button onclick="carregarDados()">Carregar Dados</button>
+        <button onclick="carregarDados()">Atualizar Agora</button>
+        <span id="lastUpdate" class="status-badge">Aguardando dados...</span>
     </div>
 
     <!-- Indicadores KPI -->
@@ -128,7 +136,7 @@
         </div>
         <div class="kpi-card" style="border-color: #F59E0B;">
             <div class="kpi-title">TOTAL DE LEITURAS</div>
-            <div class="kpi-value" id="kpiLeituras">--</div>
+            <div class="kpi-value" id="kpiLeituras">0</div>
         </div>
     </div>
 
@@ -145,7 +153,59 @@
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
-        let timerAtualizacao = null;
+
+        // Inicializa a estrutura dos gráficos no carregamento da página
+        function inicializarGraficos() {
+            const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
+            chartAcelInstance = new Chart(ctxAcel, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'Eixo X', data: [], borderColor: '#EF4444', borderWidth: 1.5, fill: false, pointRadius: 0 },
+                        { label: 'Eixo Y', data: [], borderColor: '#10B981', borderWidth: 1.5, fill: false, pointRadius: 0 },
+                        { label: 'Eixo Z', data: [], borderColor: '#3B82F6', borderWidth: 1.5, fill: false, pointRadius: 0 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    animation: false,
+                    plugins: {
+                        title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
+                        legend: { labels: { color: '#CBD5E1' } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
+                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
+                    }
+                }
+            });
+
+            const ctxFFT = document.getElementById('chartFFT').getContext('2d');
+            chartFFTInstance = new Chart(ctxFFT, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Magnitude (g)',
+                        data: [],
+                        backgroundColor: '#8B5CF6'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    animation: false,
+                    plugins: {
+                        title: { display: true, text: '2. Espectro de Frequência - Eixo X (FFT)', color: '#F8FAFC' },
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
+                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
+                    }
+                }
+            });
+        }
 
         function carregarDados() {
             let url = document.getElementById('csvUrl').value.trim();
@@ -154,12 +214,11 @@
                 return;
             }
 
-            // Garante que o link usa o formato CSV
             if (url.includes('pubhtml')) {
                 url = url.replace('pubhtml', 'pub') + '&output=csv';
             }
 
-            // Adiciona timestamp para desativar o cache do navegador
+            // Garante que o navegador recarregue o CSV sem usar cache antigo
             const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
 
             Papa.parse(urlSemCache, {
@@ -169,6 +228,7 @@
                 complete: function(results) {
                     if (results.data && results.data.length > 0) {
                         processarDados(results.data);
+                        document.getElementById('lastUpdate').innerText = 'Última atualização: ' + new Date().toLocaleTimeString();
                     }
                 },
                 error: function(err) {
@@ -200,46 +260,23 @@
                 if (row['Status']) ultimoStatus = row['Status'];
             });
 
-            // Atualizar KPIs
+            // Atualização dos KPIs
             document.getElementById('kpiStatus').innerText = ultimoStatus;
             document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
-            document.getElementById('kpiLeituras').innerText = data.length;
+            document.getElementById('kpiLeituras').innerText = data.length.toLocaleString('pt-BR');
 
-            // Renderizar Gráficos
-            renderizarGraficoAceleracao(tempos, acelX, acelY, acelZ);
-            renderizarGraficoFFT(acelX, tempos);
+            // Atualização contínua do gráfico de aceleração (sem destroy)
+            chartAcelInstance.data.labels = tempos;
+            chartAcelInstance.data.datasets[0].data = acelX;
+            chartAcelInstance.data.datasets[1].data = acelY;
+            chartAcelInstance.data.datasets[2].data = acelZ;
+            chartAcelInstance.update('none'); // Modo 'none' atualiza sem animações bruscas
+
+            // Atualização do gráfico de FFT
+            atualizarFFT(acelX, tempos);
         }
 
-        function renderizarGraficoAceleracao(tempos, x, y, z) {
-            const ctx = document.getElementById('chartAceleracao').getContext('2d');
-            if (chartAcelInstance) chartAcelInstance.destroy();
-
-            chartAcelInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: tempos,
-                    datasets: [
-                        { label: 'Eixo X', data: x, borderColor: '#EF4444', borderWidth: 1.5, fill: false },
-                        { label: 'Eixo Y', data: y, borderColor: '#10B981', borderWidth: 1.5, fill: false },
-                        { label: 'Eixo Z', data: z, borderColor: '#3B82F6', borderWidth: 1.5, fill: false }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    animation: false, // Desativa animação para transição suave em updates
-                    plugins: {
-                        title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
-                        legend: { labels: { color: '#CBD5E1' } }
-                    },
-                    scales: {
-                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
-                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
-                    }
-                }
-            });
-        }
-
-        function renderizarGraficoFFT(sinalX, tempos) {
+        function atualizarFFT(sinalX, tempos) {
             const N = sinalX.length;
             if (N < 2) return;
 
@@ -254,7 +291,6 @@
             for (let k = 0; k < numBins; k++) {
                 let real = 0;
                 let imag = 0;
-                let freq = (k * Fs) / N;
 
                 for (let n = 0; n < N; n++) {
                     let angle = (2 * Math.PI * k * n) / N;
@@ -263,43 +299,23 @@
                 }
 
                 let mag = (Math.sqrt(real * real + imag * imag) / N) * 2;
-                freqs.push(freq.toFixed(2));
+                freqs.push(((k * Fs) / N).toFixed(2));
                 magnitudes.push(mag.toFixed(4));
             }
 
-            const ctx = document.getElementById('chartFFT').getContext('2d');
-            if (chartFFTInstance) chartFFTInstance.destroy();
-
-            chartFFTInstance = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: freqs,
-                    datasets: [{
-                        label: 'Magnitude (g)',
-                        data: magnitudes,
-                        backgroundColor: '#8B5CF6'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    animation: false,
-                    plugins: {
-                        title: { display: true, text: '2. Espectro de Frequência - Eixo X (FFT)', color: '#F8FAFC' },
-                        legend: { display: false }
-                    },
-                    scales: {
-                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
-                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
-                    }
-                }
-            });
+            chartFFTInstance.data.labels = freqs;
+            chartFFTInstance.data.datasets[0].data = magnitudes;
+            chartFFTInstance.update('none');
         }
 
-        // Executa o carregamento inicial ao abrir a página
+        // 1. Cria a estrutura gráfica primeiro
+        inicializarGraficos();
+
+        // 2. Executa a primeira busca de dados
         carregarDados();
 
-        // Atualiza os dados automaticamente a cada 10 segundos
-        setInterval(carregarDados, 10000);
+        // 3. Atualiza os dados a cada 5 segundos (5000 ms)
+        setInterval(carregarDados, 5000);
     </script>
 </body>
 </html>
