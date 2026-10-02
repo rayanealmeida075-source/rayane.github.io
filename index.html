@@ -120,10 +120,10 @@
     <div class="kpi-container">
         <div class="kpi-card" style="border-color: #3B82F6;">
             <div class="kpi-title">ÚLTIMO STATUS</div>
-            <div class="kpi-value" id="kpiStatus">--</div>
+            <div class="kpi-value" id="kpiStatus">Normal</div>
         </div>
         <div class="kpi-card" style="border-color: #10B981;">
-            <div class="kpi-title">ACELERAÇÃO MÁX. Z (g)</div>
+            <div class="kpi-title">MAGNITUDE MÁX. Z (g)</div>
             <div class="kpi-value" id="kpiMaxZ">--</div>
         </div>
         <div class="kpi-card" style="border-color: #F59E0B;">
@@ -145,7 +145,14 @@
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
-        let timerAtualizacao = null;
+        let maiorTotalLeituras = 0;
+
+        // Função para converter o texto "135,41" para o número 135.41
+        function converterNumero(val) {
+            if (!val) return 0;
+            if (typeof val === 'number') return val;
+            return parseFloat(val.toString().replace(',', '.')) || 0;
+        }
 
         function carregarDados() {
             let url = document.getElementById('csvUrl').value.trim();
@@ -154,7 +161,6 @@
                 return;
             }
 
-            // Garante que o link usa o formato CSV
             if (url.includes('pubhtml')) {
                 url = url.replace('pubhtml', 'pub') + '&output=csv';
             }
@@ -178,57 +184,68 @@
         }
 
         function processarDados(data) {
-            let tempos = [];
-            let acelX = [];
-            let acelY = [];
-            let acelZ = [];
+            // Trava para evitar oscilações de total caindo devido ao cache do Google
+            if (data.length < maiorTotalLeituras) {
+                return;
+            }
+            maiorTotalLeituras = data.length;
+
+            let rotulos = [];
+            let magX = [];
+            let magY = [];
+            let magZ = [];
+            let freqsFFT = [];
+            let magFFT = [];
             let maxZ = 0;
-            let ultimoStatus = "Normal";
 
-            data.forEach(row => {
-                let t = parseFloat(row['Tempo (s)']) || 0;
-                let x = parseFloat(row['Aceleração X (g)']) || 0;
-                let y = parseFloat(row['Aceleração Y (g)']) || 0;
-                let z = parseFloat(row['Aceleração Z (g)']) || 0;
+            data.forEach((row, idx) => {
+                let tempo = converterNumero(row['Tempo (s)']);
+                let x = converterNumero(row['Mag X (g)']);
+                let y = converterNumero(row['Mag Y (g)']);
+                let z = converterNumero(row['Mag Z (g)']);
+                let freqX = converterNumero(row['Freq X (Hz)']);
 
-                tempos.push(t);
-                acelX.push(x);
-                acelY.push(y);
-                acelZ.push(z);
+                // Cria o rótulo para o gráfico temporal
+                rotulos.push(tempo ? `${tempo}s (#${idx+1})` : `#${idx+1}`);
+                magX.push(x);
+                magY.push(y);
+                magZ.push(z);
+
+                freqsFFT.push(freqX.toFixed(2));
+                magFFT.push(x);
 
                 if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                if (row['Status']) ultimoStatus = row['Status'];
             });
 
             // Atualizar KPIs
-            document.getElementById('kpiStatus').innerText = ultimoStatus;
+            document.getElementById('kpiStatus').innerText = maxZ > 0.5 ? "Alerta" : "Normal";
             document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
             document.getElementById('kpiLeituras').innerText = data.length;
 
             // Renderizar Gráficos
-            renderizarGraficoAceleracao(tempos, acelX, acelY, acelZ);
-            renderizarGraficoFFT(acelX, tempos);
+            renderizarGraficoAceleracao(rotulos, magX, magY, magZ);
+            renderizarGraficoFFT(freqsFFT, magFFT);
         }
 
-        function renderizarGraficoAceleracao(tempos, x, y, z) {
+        function renderizarGraficoAceleracao(rotulos, x, y, z) {
             const ctx = document.getElementById('chartAceleracao').getContext('2d');
             if (chartAcelInstance) chartAcelInstance.destroy();
 
             chartAcelInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: tempos,
+                    labels: rotulos,
                     datasets: [
-                        { label: 'Eixo X', data: x, borderColor: '#EF4444', borderWidth: 1.5, fill: false },
-                        { label: 'Eixo Y', data: y, borderColor: '#10B981', borderWidth: 1.5, fill: false },
-                        { label: 'Eixo Z', data: z, borderColor: '#3B82F6', borderWidth: 1.5, fill: false }
+                        { label: 'Mag X (g)', data: x, borderColor: '#EF4444', borderWidth: 1.5, fill: false },
+                        { label: 'Mag Y (g)', data: y, borderColor: '#10B981', borderWidth: 1.5, fill: false },
+                        { label: 'Mag Z (g)', data: z, borderColor: '#3B82F6', borderWidth: 1.5, fill: false }
                     ]
                 },
                 options: {
                     responsive: true,
-                    animation: false, // Desativa animação para transição suave em updates
+                    animation: false,
                     plugins: {
-                        title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
+                        title: { display: true, text: '1. Tendência de Magnitude por Leitura (Eixos X, Y, Z)', color: '#F8FAFC' },
                         legend: { labels: { color: '#CBD5E1' } }
                     },
                     scales: {
@@ -239,34 +256,7 @@
             });
         }
 
-        function renderizarGraficoFFT(sinalX, tempos) {
-            const N = sinalX.length;
-            if (N < 2) return;
-
-            let dt = (tempos[N - 1] - tempos[0]) / (N - 1);
-            if (!dt || dt <= 0) dt = 0.01;
-            const Fs = 1 / dt;
-
-            let freqs = [];
-            let magnitudes = [];
-
-            const numBins = Math.floor(N / 2);
-            for (let k = 0; k < numBins; k++) {
-                let real = 0;
-                let imag = 0;
-                let freq = (k * Fs) / N;
-
-                for (let n = 0; n < N; n++) {
-                    let angle = (2 * Math.PI * k * n) / N;
-                    real += sinalX[n] * Math.cos(angle);
-                    imag -= sinalX[n] * Math.sin(angle);
-                }
-
-                let mag = (Math.sqrt(real * real + imag * imag) / N) * 2;
-                freqs.push(freq.toFixed(2));
-                magnitudes.push(mag.toFixed(4));
-            }
-
+        function renderizarGraficoFFT(freqs, magnitudes) {
             const ctx = document.getElementById('chartFFT').getContext('2d');
             if (chartFFTInstance) chartFFTInstance.destroy();
 
@@ -275,7 +265,7 @@
                 data: {
                     labels: freqs,
                     datasets: [{
-                        label: 'Magnitude (g)',
+                        label: 'Mag X (g)',
                         data: magnitudes,
                         backgroundColor: '#8B5CF6'
                     }]
@@ -284,7 +274,7 @@
                     responsive: true,
                     animation: false,
                     plugins: {
-                        title: { display: true, text: '2. Espectro de Frequência - Eixo X (FFT)', color: '#F8FAFC' },
+                        title: { display: true, text: '2. Espectro de Frequência - Freq X (Hz)', color: '#F8FAFC' },
                         legend: { display: false }
                     },
                     scales: {
@@ -295,10 +285,10 @@
             });
         }
 
-        // Executa o carregamento inicial ao abrir a página
+        // Executa o carregamento inicial
         carregarDados();
 
-        // Atualiza os dados automaticamente a cada 10 segundos
+        // Atualiza a cada 10 segundos
         setInterval(carregarDados, 10000);
     </script>
 </body>
