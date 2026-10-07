@@ -129,7 +129,7 @@
             <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Link do CSV da Aba de Dados...">
         </div>
         <div class="input-group">
-            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional, será gerado automaticamente se vazio)...">
+            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional, informe se o ID da aba for diferente)...">
             <button onclick="carregarDados()">Atualizar Agora</button>
             <span id="lastUpdate" class="status-badge">Aguardando dados...</span>
         </div>
@@ -165,14 +165,30 @@
         let chartAcelInstance = null;
         let chartFFTInstance = null;
 
-        // Função utilitária para converter strings com vírgula ou ponto em número
+        // Função utilitária para converter qualquer formato numérico (com vírgula ou ponto) em float
         function parseNum(val) {
             if (typeof val === 'number') return val;
-            if (!val) return 0;
-            return parseFloat(String(val).replace(',', '.')) || 0;
+            if (val === null || val === undefined || val === '') return null;
+            let str = String(val).trim().replace(',', '.');
+            let num = parseFloat(str);
+            return isNaN(num) ? null : num;
         }
 
-        // Inicializa a estrutura dos gráficos no carregamento da página
+        // Encontra o nome da coluna no CSV de forma flexível (sem diferenciar maiúsculas/acentos)
+        function obterValorColuna(row, palavrasChave) {
+            const chaves = Object.keys(row);
+            for (let chave of chaves) {
+                const chaveNorm = chave.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                for (let pc of palavrasChave) {
+                    if (chaveNorm.includes(pc)) {
+                        let v = parseNum(row[chave]);
+                        if (v !== null) return v;
+                    }
+                }
+            }
+            return null;
+        }
+
         function inicializarGraficos() {
             const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
             chartAcelInstance = new Chart(ctxAcel, {
@@ -218,8 +234,16 @@
                         legend: { display: false }
                     },
                     scales: {
-                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
-                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
+                        x: { 
+                            title: { display: true, text: 'Frequência (Hz)', color: '#CBD5E1' },
+                            ticks: { color: '#CBD5E1' }, 
+                            grid: { color: '#334155' } 
+                        },
+                        y: { 
+                            title: { display: true, text: 'Magnitude / Amplitude', color: '#CBD5E1' },
+                            ticks: { color: '#CBD5E1' }, 
+                            grid: { color: '#334155' } 
+                        }
                     }
                 }
             });
@@ -236,10 +260,9 @@
                 url = url.replace('pubhtml', 'pub') + '&output=csv';
             }
 
-            // Garante que o navegador recarregue o CSV sem usar cache antigo
             const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
 
-            // 1. Carrega os dados da aba principal (Dados/Aceleração)
+            // 1. Carrega os dados temporais
             Papa.parse(urlSemCache, {
                 download: true,
                 header: true,
@@ -255,16 +278,15 @@
                 }
             });
 
-            // 2. Carrega os dados da outra aba (FFT)
+            // 2. Carrega a aba FFT
             carregarDadosFFT(url);
         }
 
         function carregarDadosFFT(urlBase) {
             let urlFft = document.getElementById('csvFftUrl').value.trim();
 
-            // Se o usuário não informou uma URL específica para a aba FFT, tenta trocar a gid do link
             if (!urlFft) {
-                // gid padrão da aba FFT extraído da planilha ou substituição
+                // Tenta trocar a gid para a primeira aba (gid=0) se não for especificada
                 urlFft = urlBase.replace(/gid=\d+/, 'gid=0'); 
             }
 
@@ -298,11 +320,10 @@
             let ultimoStatus = "Normal";
 
             data.forEach(row => {
-                // Tenta mapear os cabeçalhos com suporte a vírgulas decimais e variações de nomes
-                let t = parseNum(row['Tempo (s)'] || row['Tempo'] || 0);
-                let x = parseNum(row['Aceleração X (g)'] || row['Aceleração X'] || row['Aceleraçao X (g)'] || 0);
-                let y = parseNum(row['Aceleração Y (g)'] || row['Aceleração Y'] || row['Aceleraçao Y (g)'] || 0);
-                let z = parseNum(row['Aceleração Z (g)'] || row['Aceleração Z'] || row['Aceleraçao Z (g)'] || 0);
+                let t = obterValorColuna(row, ['tempo', 'time', 't']) ?? 0;
+                let x = obterValorColuna(row, ['aceleracao x', 'acel x', 'eixo x', 'x']) ?? 0;
+                let y = obterValorColuna(row, ['aceleracao y', 'acel y', 'eixo y', 'y']) ?? 0;
+                let z = obterValorColuna(row, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0;
 
                 tempos.push(t);
                 acelX.push(x);
@@ -310,17 +331,19 @@
                 acelZ.push(z);
 
                 if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                if (row['Status'] || row['Status Estrutural']) {
-                    ultimoStatus = row['Status'] || row['Status Estrutural'];
+                
+                // Busca status
+                for (let k in row) {
+                    if (k.toLowerCase().includes('status')) {
+                        ultimoStatus = row[k];
+                    }
                 }
             });
 
-            // Atualização dos KPIs
             document.getElementById('kpiStatus').innerText = ultimoStatus;
             document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
             document.getElementById('kpiLeituras').innerText = data.length.toLocaleString('pt-BR');
 
-            // Atualização contínua do gráfico de aceleração (sem destroy)
             chartAcelInstance.data.labels = tempos;
             chartAcelInstance.data.datasets[0].data = acelX;
             chartAcelInstance.data.datasets[1].data = acelY;
@@ -332,13 +355,30 @@
             let frequencias = [];
             let magnitudes = [];
 
-            data.forEach(row => {
-                // Procura por colunas de Frequência e Amplitude/Magnitude da aba FFT
-                let freq = parseNum(row['Frequência (Hz)'] || row['Frequencia (Hz)'] || row['Frequência'] || row['Frequencia'] || row['Freq'] || 0);
-                let mag = parseNum(row['Magnitude'] || row['Magnitude (g)'] || row['Amplitude'] || row['Aceleração (g)'] || 0);
+            // Pega as chaves da primeira linha para entender a estrutura
+            let colunas = Object.keys(data[0] || {});
 
-                frequencias.push(freq.toFixed(2));
-                magnitudes.push(mag.toFixed(4));
+            data.forEach((row, index) => {
+                let freq = null;
+                let mag = null;
+
+                // Tenta mapear dinamicamente por palavras-chave
+                freq = obterValorColuna(row, ['frequenc', 'freq', 'hz']);
+                mag = obterValorColuna(row, ['magnitud', 'amplitud', 'acelerac', 'mag', 'g']);
+
+                // Se não encontrou por palavra-chave, tenta pegar a 1ª coluna como Frequência e 2ª como Magnitude
+                if (freq === null && colunas.length >= 1) {
+                    freq = parseNum(row[colunas[0]]);
+                }
+                if (mag === null && colunas.length >= 2) {
+                    mag = parseNum(row[colunas[1]]);
+                }
+
+                if (freq !== null && mag !== null) {
+                    // Formatação inteligente da frequência para o rótulo
+                    frequencias.push(Number.isInteger(freq) ? freq.toString() : freq.toFixed(2));
+                    magnitudes.push(mag);
+                }
             });
 
             if (frequencias.length > 0) {
@@ -348,13 +388,8 @@
             }
         }
 
-        // 1. Cria a estrutura gráfica primeiro
         inicializarGraficos();
-
-        // 2. Executa a primeira busca de dados
         carregarDados();
-
-        // 3. Atualiza os dados a cada 5 segundos (5000 ms)
         setInterval(carregarDados, 5000);
     </script>
 </body>
