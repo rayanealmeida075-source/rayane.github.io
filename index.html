@@ -137,7 +137,7 @@
             <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional)...">
             <button onclick="carregarDados()">Atualizar Agora</button>
             <button onclick="reiniciarDados()" style="background-color: #EF4444;">Zerar Leituras</button>
-            <span id="lastUpdate" class="status-badge">Aguardando dados...</span>
+            <span id="lastUpdate" class="status-badge">Carregando dados...</span>
         </div>
         <div class="input-group">
             <label for="limiteExibicao">Exibir últimas N leituras no gráfico (0 = todas):</label>
@@ -176,9 +176,8 @@
         let chartAcelInstance = null;
         let chartFFTInstance = null;
 
-        // 🔑 ARMAZENAMENTO ÚNICO DE LEITURAS (IMPEDE PERDA DE DADOS E RECETES)
-        let mapaLeituras = new Map(); 
-        let listaAcumulada = [];
+        // Guarda as leituras acumuladas
+        let leiturasAcumuladas = [];
 
         function parseNum(val) {
             if (typeof val === 'number') return val;
@@ -189,6 +188,7 @@
         }
 
         function obterValorColuna(row, palavrasChave) {
+            if (!row) return null;
             const chaves = Object.keys(row);
             for (let chave of chaves) {
                 const chaveNorm = chave.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -267,8 +267,7 @@
         }
 
         function reiniciarDados() {
-            mapaLeituras.clear();
-            listaAcumulada = [];
+            leiturasAcumuladas = [];
             carregarDados();
         }
 
@@ -288,12 +287,15 @@
                 skipEmptyLines: true,
                 complete: function(results) {
                     if (results.data && results.data.length > 0) {
-                        processarDadosAcumulativos(results.data);
+                        processarDadosComGarantia(results.data);
                         document.getElementById('lastUpdate').innerText = 'Última atualização: ' + new Date().toLocaleTimeString();
+                    } else {
+                        document.getElementById('lastUpdate').innerText = 'Aviso: CSV sem dados disponíveis.';
                     }
                 },
                 error: function(err) {
-                    console.error('Erro ao carregar os dados temporais:', err);
+                    console.error('Erro ao carregar o CSV:', err);
+                    document.getElementById('lastUpdate').innerText = 'Erro ao conectar à planilha.';
                 }
             });
 
@@ -302,9 +304,7 @@
 
         function carregarDadosFFT(urlBase) {
             let urlFft = document.getElementById('csvFftUrl').value.trim();
-            if (!urlFft) {
-                urlFft = urlBase.replace(/gid=\d+/, 'gid=0');
-            }
+            if (!urlFft) return; // Só carrega se o usuário informar a URL da FFT
 
             if (urlFft.includes('pubhtml')) {
                 urlFft = urlFft.replace('pubhtml', 'pub') + '&output=csv';
@@ -324,30 +324,21 @@
             });
         }
 
-        // 🛡️ DEDUP E ACÚMULO SEGURO: GARANTE QUE AS LEITURAS SÓ CREÇAM (1, 2, 3, 4, 5...)
-        function processarDadosAcumulativos(novosDados) {
-            novosDados.forEach((linha) => {
-                let tempo = obterValorColuna(linha, ['tempo', 'time', 't']) ?? 0;
-                let x = obterValorColuna(linha, ['aceleracao x', 'acel x', 'eixo x', 'x']) ?? 0;
-                let y = obterValorColuna(linha, ['aceleracao y', 'acel y', 'eixo y', 'y']) ?? 0;
-                let z = obterValorColuna(linha, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0;
+        // 🛡️ MANTÉM OS DADOS ACUMULADOS E IMPEDE QUE A CONTAGEM VOLTE PARA TRÁS
+        function processarDadosComGarantia(novosDados) {
+            // Se o Google Sheets enviar mais dados do que temos, atualizamos o histórico acumulado
+            if (novosDados.length >= leiturasAcumuladas.length) {
+                leiturasAcumuladas = novosDados;
+            }
+            // Se o Google Sheets enviar menos dados (devido a cache temporário antigo), mantemos as leiturasAcumuladas!
 
-                // Gera uma chave única baseada no tempo e valores dos eixos
-                let chaveUnica = `${tempo}_${x}_${y}_${z}`;
-
-                if (!mapaLeituras.has(chaveUnica)) {
-                    mapaLeituras.set(chaveUnica, linha);
-                    listaAcumulada.push(linha);
-                }
-            });
-
-            atualizarPainel(listaAcumulada);
+            renderizarPainel(leiturasAcumuladas);
         }
 
-        function atualizarPainel(data) {
-            if (data.length === 0) return;
+        function renderizarPainel(data) {
+            if (!data || data.length === 0) return;
 
-            // 1. Atualizar KPIs com o total acumulado constante
+            // 1. Atualizar KPIs
             let maxZ = 0;
             data.forEach(row => {
                 let z = obterValorColuna(row, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0;
@@ -356,12 +347,84 @@
 
             let ultimoStatus = "Normal";
             const ultimaLinha = data[data.length - 1];
-            for (let k in ultimaLinha) {
-                if (k.toLowerCase().includes('status')) {
-                    ultimoStatus = ultimaLinha[k];
-                    break;
+            if (ultimaLinha) {
+                for (let k in ultimaLinha) {
+                    if (k.toLowerCase().includes('status')) {
+                        ultimoStatus = ultimaLinha[k];
+                        break;
+                    }
                 }
             }
 
             document.getElementById('kpiStatus').innerText = ultimoStatus;
-            document.
+            document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
+            document.getElementById('kpiLeituras').innerText = data.length.toLocaleString('pt-BR');
+
+            // 2. Limite visual de exibição
+            let limite = parseInt(document.getElementById('limiteExibicao').value) || 0;
+            let dadosExibicao = data;
+            let inicioIndice = 1;
+
+            if (limite > 0 && data.length > limite) {
+                dadosExibicao = data.slice(data.length - limite);
+                inicioIndice = data.length - limite + 1;
+            }
+
+            let labels = [];
+            let pontosX = [];
+            let pontosY = [];
+            let pontosZ = [];
+
+            dadosExibicao.forEach((row, idx) => {
+                let numeroLeitura = inicioIndice + idx;
+                labels.push(numeroLeitura.toString()); // Eixo X: 1, 2, 3, 4, 5...
+
+                pontosX.push(obterValorColuna(row, ['aceleracao x', 'acel x', 'eixo x', 'x']) ?? 0);
+                pontosY.push(obterValorColuna(row, ['aceleracao y', 'acel y', 'eixo y', 'y']) ?? 0);
+                pontosZ.push(obterValorColuna(row, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0);
+            });
+
+            // Atualiza o gráfico de aceleração
+            chartAcelInstance.data.labels = labels;
+            chartAcelInstance.data.datasets[0].data = pontosX;
+            chartAcelInstance.data.datasets[1].data = pontosY;
+            chartAcelInstance.data.datasets[2].data = pontosZ;
+            chartAcelInstance.update('none');
+
+            document.getElementById('janelaAtual').innerText = 
+                `Exibindo leituras: ${inicioIndice} a ${inicioIndice + dadosExibicao.length - 1}`;
+        }
+
+        function processarDadosFFT(data) {
+            let frequencias = [];
+            let magnitudes = [];
+            let colunas = Object.keys(data[0] || {});
+
+            data.forEach((row) => {
+                let freq = obterValorColuna(row, ['frequenc', 'freq', 'hz']);
+                let mag = obterValorColuna(row, ['magnitud', 'amplitud', 'acelerac', 'mag', 'g']);
+
+                if (freq === null && colunas.length >= 1) freq = parseNum(row[colunas[0]]);
+                if (mag === null && colunas.length >= 2) mag = parseNum(row[colunas[1]]);
+
+                if (freq !== null && mag !== null) {
+                    frequencias.push(Number.isInteger(freq) ? freq.toString() : freq.toFixed(2));
+                    magnitudes.push(mag);
+                }
+            });
+
+            if (frequencias.length > 0) {
+                chartFFTInstance.data.labels = frequencias;
+                chartFFTInstance.data.datasets[0].data = magnitudes;
+                chartFFTInstance.update('none');
+            }
+        }
+
+        document.getElementById('limiteExibicao').addEventListener('change', () => renderizarPainel(leiturasAcumuladas));
+
+        inicializarGraficos();
+        carregarDados();
+        setInterval(carregarDados, 3000);
+    </script>
+</body>
+</html>
