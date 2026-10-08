@@ -135,11 +135,12 @@
         </div>
         <div class="input-group">
             <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional)...">
-            <button onclick="carregarDados()">Atualizar Agora</button>
+            <button onclick="forcarAtualizar()">Atualizar Agora</button>
+            <button onclick="reiniciarBuffer()" style="background-color: #EF4444;">Limpar / Reiniciar</button>
             <span id="lastUpdate" class="status-badge">Aguardando dados...</span>
         </div>
         <div class="input-group">
-            <label for="limiteExibicao">Máximo de leituras visíveis no gráfico (0 para ver todas):</label>
+            <label for="limiteExibicao">Máximo de leituras no gráfico (0 = todas):</label>
             <input type="number" id="limiteExibicao" value="50" min="0" step="5" style="max-width:120px;">
             <span id="janelaAtual" class="status-badge">Exibindo: 0 leituras</span>
         </div>
@@ -175,7 +176,9 @@
         let chartAcelInstance = null;
         let chartFFTInstance = null;
 
-        // Converte valores para número float
+        // 🔒 BUFFER ACUMULATIVO PARA IMPEDIR QUE OS DADOS VOLTEM NO TEMPO
+        let bufferDados = [];
+
         function parseNum(val) {
             if (typeof val === 'number') return val;
             if (val === null || val === undefined || val === '') return null;
@@ -184,7 +187,6 @@
             return isNaN(num) ? null : num;
         }
 
-        // Busca o valor da coluna por palavras-chave
         function obterValorColuna(row, palavrasChave) {
             const chaves = Object.keys(row);
             for (let chave of chaves) {
@@ -254,165 +256,4 @@
                             grid: { color: '#334155' }
                         },
                         y: {
-                            title: { display: true, text: 'Magnitude / Amplitude', color: '#CBD5E1' },
-                            ticks: { color: '#CBD5E1' },
-                            grid: { color: '#334155' }
-                        }
-                    }
-                }
-            });
-        }
-
-        function carregarDados() {
-            let url = document.getElementById('csvUrl').value.trim();
-            if (!url) {
-                alert('Por favor, insira a URL do arquivo CSV publicado.');
-                return;
-            }
-
-            if (url.includes('pubhtml')) {
-                url = url.replace('pubhtml', 'pub') + '&output=csv';
-            }
-
-            const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
-
-            Papa.parse(urlSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDados(results.data);
-                        document.getElementById('lastUpdate').innerText = 'Última atualização: ' + new Date().toLocaleTimeString();
-                    }
-                },
-                error: function(err) {
-                    console.error('Erro ao carregar os dados temporais:', err);
-                }
-            });
-
-            carregarDadosFFT(url);
-        }
-
-        function carregarDadosFFT(urlBase) {
-            let urlFft = document.getElementById('csvFftUrl').value.trim();
-
-            if (!urlFft) {
-                urlFft = urlBase.replace(/gid=\d+/, 'gid=0');
-            }
-
-            if (urlFft.includes('pubhtml')) {
-                urlFft = urlFft.replace('pubhtml', 'pub') + '&output=csv';
-            }
-
-            const urlFftSemCache = urlFft + (urlFft.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
-
-            Papa.parse(urlFftSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDadosFFT(results.data);
-                    }
-                },
-                error: function(err) {
-                    console.error('Erro ao carregar os dados da aba FFT:', err);
-                }
-            });
-        }
-
-        function processarDados(data) {
-            // 1. Atualizar KPIs com base em todos os dados carregados
-            let maxZ = 0;
-            data.forEach(row => {
-                let z = obterValorColuna(row, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0;
-                if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-            });
-
-            let ultimoStatus = "Normal";
-            if (data.length > 0) {
-                const ultimaLinha = data[data.length - 1];
-                for (let k in ultimaLinha) {
-                    if (k.toLowerCase().includes('status')) {
-                        ultimoStatus = ultimaLinha[k];
-                        break;
-                    }
-                }
-            }
-
-            document.getElementById('kpiStatus').innerText = ultimoStatus;
-            document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
-            document.getElementById('kpiLeituras').innerText = data.length.toLocaleString('pt-BR');
-
-            // 2. Montar sequências ordinais de leituras (1, 2, 3, 4, 5...)
-            let limite = parseInt(document.getElementById('limiteExibicao').value) || 0;
-            
-            // Caso deseje limitar a quantidade de pontos mais recentes exibidos na tela
-            let dadosExibicao = data;
-            let inicioIndice = 1;
-
-            if (limite > 0 && data.length > limite) {
-                dadosExibicao = data.slice(data.length - limite);
-                inicioIndice = data.length - limite + 1;
-            }
-
-            let labels = [];
-            let pontosX = [];
-            let pontosY = [];
-            let pontosZ = [];
-
-            dadosExibicao.forEach((row, idx) => {
-                let numeroLeitura = inicioIndice + idx; // Gera a sequência de leitura 1, 2, 3...
-                labels.push('Leitura ' + numeroLeitura);
-
-                pontosX.push(obterValorColuna(row, ['aceleracao x', 'acel x', 'eixo x', 'x']) ?? 0);
-                pontosY.push(obterValorColuna(row, ['aceleracao y', 'acel y', 'eixo y', 'y']) ?? 0);
-                pontosZ.push(obterValorColuna(row, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0);
-            });
-
-            // Atualizar o gráfico de aceleração
-            chartAcelInstance.data.labels = labels;
-            chartAcelInstance.data.datasets[0].data = pontosX;
-            chartAcelInstance.data.datasets[1].data = pontosY;
-            chartAcelInstance.data.datasets[2].data = pontosZ;
-            chartAcelInstance.update('none');
-
-            document.getElementById('janelaAtual').innerText = 
-                `Exibindo leituras: ${inicioIndice} a ${inicioIndice + dadosExibicao.length - 1}`;
-        }
-
-        function processarDadosFFT(data) {
-            let frequencias = [];
-            let magnitudes = [];
-
-            let colunas = Object.keys(data[0] || {});
-
-            data.forEach((row) => {
-                let freq = obterValorColuna(row, ['frequenc', 'freq', 'hz']);
-                let mag = obterValorColuna(row, ['magnitud', 'amplitud', 'acelerac', 'mag', 'g']);
-
-                if (freq === null && colunas.length >= 1) freq = parseNum(row[colunas[0]]);
-                if (mag === null && colunas.length >= 2) mag = parseNum(row[colunas[1]]);
-
-                if (freq !== null && mag !== null) {
-                    frequencias.push(Number.isInteger(freq) ? freq.toString() : freq.toFixed(2));
-                    magnitudes.push(mag);
-                }
-            });
-
-            if (frequencias.length > 0) {
-                chartFFTInstance.data.labels = frequencias;
-                chartFFTInstance.data.datasets[0].data = magnitudes;
-                chartFFTInstance.update('none');
-            }
-        }
-
-        document.getElementById('limiteExibicao').addEventListener('change', carregarDados);
-
-        inicializarGraficos();
-        carregarDados();
-        setInterval(carregarDados, 5000);
-    </script>
-</body>
-</html>
+                            title: { display: true, text: 'Magnitude / Amplitude', color: '#
