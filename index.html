@@ -87,7 +87,7 @@
             align-items: center;
         }
 
-        input[type="text"] {
+        input[type="text"], input[type="number"] {
             flex: 1;
             padding: 10px;
             border-radius: 5px;
@@ -115,6 +115,11 @@
             color: #10B981;
             font-weight: 500;
         }
+
+        label {
+            color: #CBD5E1;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -132,6 +137,12 @@
             <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional, informe se o ID da aba for diferente)...">
             <button onclick="carregarDados()">Atualizar Agora</button>
             <span id="lastUpdate" class="status-badge">Aguardando dados...</span>
+        </div>
+        <!-- NOVO: Campo de intervalo do eixo X -->
+        <div class="input-group">
+            <label for="intervalo">Intervalo do eixo X (s):</label>
+            <input type="number" id="intervalo" value="10" min="1" step="1" style="max-width:120px;">
+            <span id="janelaAtual" class="status-badge">Janela: -- a --</span>
         </div>
     </div>
 
@@ -165,6 +176,12 @@
         let chartAcelInstance = null;
         let chartFFTInstance = null;
 
+        // 👇 Variáveis para controle da janela deslizante do eixo X
+        let janelaInicio = 0;      // início atual da janela no eixo X
+        let janelaFim = 10;        // fim atual da janela
+        let dadosCompletos = [];   // guarda TODOS os dados brutos carregados
+        let ultimoTempoMax = 0;    // maior tempo já visto (para saber quando avançar)
+
         // Função utilitária para converter qualquer formato numérico (com vírgula ou ponto) em float
         function parseNum(val) {
             if (typeof val === 'number') return val;
@@ -189,6 +206,12 @@
             return null;
         }
 
+        // Lê o campo de intervalo (valor em segundos)
+        function obterIntervalo() {
+            let v = parseFloat(document.getElementById('intervalo').value);
+            return (isNaN(v) || v <= 0) ? 10 : v;
+        }
+
         function inicializarGraficos() {
             const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
             chartAcelInstance = new Chart(ctxAcel, {
@@ -209,7 +232,14 @@
                         legend: { labels: { color: '#CBD5E1' } }
                     },
                     scales: {
-                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
+                        x: {
+                            type: 'linear',   // 👈 eixo numérico (permite min/max reais)
+                            min: 0,
+                            max: 10,
+                            title: { display: true, text: 'Tempo (s)', color: '#CBD5E1' },
+                            ticks: { color: '#CBD5E1' },
+                            grid: { color: '#334155' }
+                        },
                         y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
                     }
                 }
@@ -234,15 +264,15 @@
                         legend: { display: false }
                     },
                     scales: {
-                        x: { 
+                        x: {
                             title: { display: true, text: 'Frequência (Hz)', color: '#CBD5E1' },
-                            ticks: { color: '#CBD5E1' }, 
-                            grid: { color: '#334155' } 
+                            ticks: { color: '#CBD5E1' },
+                            grid: { color: '#334155' }
                         },
-                        y: { 
+                        y: {
                             title: { display: true, text: 'Magnitude / Amplitude', color: '#CBD5E1' },
-                            ticks: { color: '#CBD5E1' }, 
-                            grid: { color: '#334155' } 
+                            ticks: { color: '#CBD5E1' },
+                            grid: { color: '#334155' }
                         }
                     }
                 }
@@ -287,7 +317,7 @@
 
             if (!urlFft) {
                 // Tenta trocar a gid para a primeira aba (gid=0) se não for especificada
-                urlFft = urlBase.replace(/gid=\d+/, 'gid=0'); 
+                urlFft = urlBase.replace(/gid=\d+/, 'gid=0');
             }
 
             if (urlFft.includes('pubhtml')) {
@@ -312,43 +342,86 @@
         }
 
         function processarDados(data) {
-            let tempos = [];
-            let acelX = [];
-            let acelY = [];
-            let acelZ = [];
+            // Guarda os dados brutos para reprocessar quando a janela mudar
+            dadosCompletos = data;
+
+            // Atualiza os KPIs (sempre com base em TODOS os dados)
             let maxZ = 0;
-            let ultimoStatus = "Normal";
-
             data.forEach(row => {
-                let t = obterValorColuna(row, ['tempo', 'time', 't']) ?? 0;
-                let x = obterValorColuna(row, ['aceleracao x', 'acel x', 'eixo x', 'x']) ?? 0;
-                let y = obterValorColuna(row, ['aceleracao y', 'acel y', 'eixo y', 'y']) ?? 0;
                 let z = obterValorColuna(row, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0;
-
-                tempos.push(t);
-                acelX.push(x);
-                acelY.push(y);
-                acelZ.push(z);
-
                 if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                
-                // Busca status
-                for (let k in row) {
+            });
+
+            // Pega o status da ÚLTIMA linha (correção em relação ao código original)
+            let ultimoStatus = "Normal";
+            if (data.length > 0) {
+                const ultimaLinha = data[data.length - 1];
+                for (let k in ultimaLinha) {
                     if (k.toLowerCase().includes('status')) {
-                        ultimoStatus = row[k];
+                        ultimoStatus = ultimaLinha[k];
+                        break;
                     }
                 }
-            });
+            }
 
             document.getElementById('kpiStatus').innerText = ultimoStatus;
             document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
             document.getElementById('kpiLeituras').innerText = data.length.toLocaleString('pt-BR');
 
-            chartAcelInstance.data.labels = tempos;
-            chartAcelInstance.data.datasets[0].data = acelX;
-            chartAcelInstance.data.datasets[1].data = acelY;
-            chartAcelInstance.data.datasets[2].data = acelZ;
+            // Aplica a janela deslizante
+            aplicarJanela();
+        }
+
+        // 👇 Filtra os dados pela janela atual e desenha no gráfico
+        function aplicarJanela() {
+            if (dadosCompletos.length === 0) return;
+
+            // Descobre o maior tempo dos dados atuais
+            let temposTodos = dadosCompletos.map(row =>
+                obterValorColuna(row, ['tempo', 'time', 't']) ?? 0
+            );
+            ultimoTempoMax = Math.max(...temposTodos);
+
+            // Garante que janelaFim reflita o intervalo atual do campo
+            const intervalo = obterIntervalo();
+            if ((janelaFim - janelaInicio) !== intervalo) {
+                // Se o usuário alterou o campo mas ainda não disparou o evento, ajusta
+                janelaInicio = 0;
+                janelaFim = intervalo;
+            }
+
+            // Se o tempo máximo já passou do fim da janela, avança a janela
+            while (ultimoTempoMax >= janelaFim) {
+                janelaInicio = janelaFim;
+                janelaFim = janelaInicio + intervalo;
+            }
+
+            // Filtra os pontos que estão dentro da janela atual
+            let pontosX = [], pontosY = [], pontosZ = [];
+
+            dadosCompletos.forEach(row => {
+                let t = obterValorColuna(row, ['tempo', 'time', 't']) ?? 0;
+                if (t >= janelaInicio && t <= janelaFim) {
+                    pontosX.push({ x: t, y: obterValorColuna(row, ['aceleracao x', 'acel x', 'eixo x', 'x']) ?? 0 });
+                    pontosY.push({ x: t, y: obterValorColuna(row, ['aceleracao y', 'acel y', 'eixo y', 'y']) ?? 0 });
+                    pontosZ.push({ x: t, y: obterValorColuna(row, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0 });
+                }
+            });
+
+            // Atualiza datasets
+            chartAcelInstance.data.datasets[0].data = pontosX;
+            chartAcelInstance.data.datasets[1].data = pontosY;
+            chartAcelInstance.data.datasets[2].data = pontosZ;
+
+            // Fixa a faixa do eixo X na janela atual
+            chartAcelInstance.options.scales.x.min = janelaInicio;
+            chartAcelInstance.options.scales.x.max = janelaFim;
+
             chartAcelInstance.update('none');
+
+            // Atualiza o indicador visual da janela
+            document.getElementById('janelaAtual').innerText =
+                `Janela: ${janelaInicio} a ${janelaFim}`;
         }
 
         function processarDadosFFT(data) {
@@ -387,6 +460,13 @@
                 chartFFTInstance.update('none');
             }
         }
+
+        // Quando o usuário mudar o intervalo, reinicia a janela do zero
+        document.getElementById('intervalo').addEventListener('change', function() {
+            janelaInicio = 0;
+            janelaFim = obterIntervalo();
+            aplicarJanela();
+        });
 
         inicializarGraficos();
         carregarDados();
