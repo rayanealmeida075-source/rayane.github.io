@@ -135,12 +135,12 @@
         </div>
         <div class="input-group">
             <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional)...">
-            <button onclick="forcarAtualizar()">Atualizar Agora</button>
-            <button onclick="reiniciarBuffer()" style="background-color: #EF4444;">Limpar / Reiniciar</button>
+            <button onclick="carregarDados()">Atualizar Agora</button>
+            <button onclick="reiniciarDados()" style="background-color: #EF4444;">Zerar Leituras</button>
             <span id="lastUpdate" class="status-badge">Aguardando dados...</span>
         </div>
         <div class="input-group">
-            <label for="limiteExibicao">Máximo de leituras no gráfico (0 = todas):</label>
+            <label for="limiteExibicao">Exibir últimas N leituras no gráfico (0 = todas):</label>
             <input type="number" id="limiteExibicao" value="50" min="0" step="5" style="max-width:120px;">
             <span id="janelaAtual" class="status-badge">Exibindo: 0 leituras</span>
         </div>
@@ -176,8 +176,9 @@
         let chartAcelInstance = null;
         let chartFFTInstance = null;
 
-        // 🔒 BUFFER ACUMULATIVO PARA IMPEDIR QUE OS DADOS VOLTEM NO TEMPO
-        let bufferDados = [];
+        // 🔑 ARMAZENAMENTO ÚNICO DE LEITURAS (IMPEDE PERDA DE DADOS E RECETES)
+        let mapaLeituras = new Map(); 
+        let listaAcumulada = [];
 
         function parseNum(val) {
             if (typeof val === 'number') return val;
@@ -217,7 +218,7 @@
                     responsive: true,
                     animation: false,
                     plugins: {
-                        title: { display: true, text: '1. Histórico Sequencial de Aceleração (Leituras 1, 2, 3...)', color: '#F8FAFC' },
+                        title: { display: true, text: '1. Histórico Sequencial de Aceleração (1, 2, 3, 4, 5...)', color: '#F8FAFC' },
                         legend: { labels: { color: '#CBD5E1' } }
                     },
                     scales: {
@@ -256,4 +257,111 @@
                             grid: { color: '#334155' }
                         },
                         y: {
-                            title: { display: true, text: 'Magnitude / Amplitude', color: '#
+                            title: { display: true, text: 'Magnitude / Amplitude', color: '#CBD5E1' },
+                            ticks: { color: '#CBD5E1' },
+                            grid: { color: '#334155' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function reiniciarDados() {
+            mapaLeituras.clear();
+            listaAcumulada = [];
+            carregarDados();
+        }
+
+        function carregarDados() {
+            let url = document.getElementById('csvUrl').value.trim();
+            if (!url) return;
+
+            if (url.includes('pubhtml')) {
+                url = url.replace('pubhtml', 'pub') + '&output=csv';
+            }
+
+            const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+
+            Papa.parse(urlSemCache, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processarDadosAcumulativos(results.data);
+                        document.getElementById('lastUpdate').innerText = 'Última atualização: ' + new Date().toLocaleTimeString();
+                    }
+                },
+                error: function(err) {
+                    console.error('Erro ao carregar os dados temporais:', err);
+                }
+            });
+
+            carregarDadosFFT(url);
+        }
+
+        function carregarDadosFFT(urlBase) {
+            let urlFft = document.getElementById('csvFftUrl').value.trim();
+            if (!urlFft) {
+                urlFft = urlBase.replace(/gid=\d+/, 'gid=0');
+            }
+
+            if (urlFft.includes('pubhtml')) {
+                urlFft = urlFft.replace('pubhtml', 'pub') + '&output=csv';
+            }
+
+            const urlFftSemCache = urlFft + (urlFft.includes('?') ? '&' : '?') + '_t=' + Date.now();
+
+            Papa.parse(urlFftSemCache, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processarDadosFFT(results.data);
+                    }
+                }
+            });
+        }
+
+        // 🛡️ DEDUP E ACÚMULO SEGURO: GARANTE QUE AS LEITURAS SÓ CREÇAM (1, 2, 3, 4, 5...)
+        function processarDadosAcumulativos(novosDados) {
+            novosDados.forEach((linha) => {
+                let tempo = obterValorColuna(linha, ['tempo', 'time', 't']) ?? 0;
+                let x = obterValorColuna(linha, ['aceleracao x', 'acel x', 'eixo x', 'x']) ?? 0;
+                let y = obterValorColuna(linha, ['aceleracao y', 'acel y', 'eixo y', 'y']) ?? 0;
+                let z = obterValorColuna(linha, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0;
+
+                // Gera uma chave única baseada no tempo e valores dos eixos
+                let chaveUnica = `${tempo}_${x}_${y}_${z}`;
+
+                if (!mapaLeituras.has(chaveUnica)) {
+                    mapaLeituras.set(chaveUnica, linha);
+                    listaAcumulada.push(linha);
+                }
+            });
+
+            atualizarPainel(listaAcumulada);
+        }
+
+        function atualizarPainel(data) {
+            if (data.length === 0) return;
+
+            // 1. Atualizar KPIs com o total acumulado constante
+            let maxZ = 0;
+            data.forEach(row => {
+                let z = obterValorColuna(row, ['aceleracao z', 'acel z', 'eixo z', 'z']) ?? 0;
+                if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
+            });
+
+            let ultimoStatus = "Normal";
+            const ultimaLinha = data[data.length - 1];
+            for (let k in ultimaLinha) {
+                if (k.toLowerCase().includes('status')) {
+                    ultimoStatus = ultimaLinha[k];
+                    break;
+                }
+            }
+
+            document.getElementById('kpiStatus').innerText = ultimoStatus;
+            document.
