@@ -3,11 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Monitoramento Estrutural Instantâneo</title>
+    <title>Painel de Monitoramento Estrutural</title>
     <!-- Chart.js para geração de gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PapaParse para leitura fácil de arquivos CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
-        * { box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             background-color: #0F172A;
             color: #F8FAFC;
@@ -15,6 +20,7 @@
             margin: 0;
             padding: 20px;
         }
+
         .header {
             background-color: #1E293B;
             padding: 15px;
@@ -24,10 +30,12 @@
             font-weight: bold;
             color: #F8FAFC;
             margin-bottom: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
+
         .live-indicator {
             font-size: 0.85rem;
             color: #10B981;
@@ -36,30 +44,35 @@
             align-items: center;
             gap: 6px;
         }
+
         .pulse-dot {
             width: 10px;
             height: 10px;
             background-color: #10B981;
             border-radius: 50%;
             display: inline-block;
-            animation: pulse 1s infinite;
+            animation: pulse 1.5s infinite;
         }
+
         @keyframes pulse {
             0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
             70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
             100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
+
         .controls {
             margin-bottom: 20px;
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
+
         .input-group {
             display: flex;
             gap: 10px;
             align-items: center;
         }
+
         input[type="text"] {
             flex: 1;
             padding: 10px;
@@ -68,6 +81,7 @@
             background-color: #1E293B;
             color: #FFF;
         }
+
         button {
             padding: 10px 20px;
             background-color: #3B82F6;
@@ -77,14 +91,24 @@
             cursor: pointer;
             font-weight: bold;
         }
-        button:hover { background-color: #2563EB; }
-        .status-badge { font-size: 0.85rem; color: #10B981; font-weight: 500; }
+
+        button:hover {
+            background-color: #2563EB;
+        }
+
+        .status-badge {
+            font-size: 0.85rem;
+            color: #10B981;
+            font-weight: 500;
+        }
+
         .kpi-container {
             display: flex;
             gap: 15px;
             margin-bottom: 20px;
             justify-content: space-between;
         }
+
         .kpi-card {
             background-color: #1E293B;
             flex: 1;
@@ -93,20 +117,34 @@
             text-align: center;
             border-top: 4px solid #3B82F6;
         }
-        .kpi-title { font-size: 0.8rem; color: #94A3B8; font-weight: bold; margin-bottom: 5px; }
-        .kpi-value { font-size: 1.5rem; font-weight: bold; }
+
+        .kpi-title {
+            font-size: 0.8rem;
+            color: #94A3B8;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .kpi-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
         .charts-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
             gap: 20px;
         }
+
         .chart-card {
             background-color: #1E293B;
             padding: 15px;
             border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             position: relative;
             height: 320px;
         }
+
         .log-panel {
             margin-top: 20px;
             font-size: 0.8rem;
@@ -120,159 +158,14 @@
 <body>
 
     <div class="header">
-        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL (TEMPO REAL INSTANTÂNEO)</span>
+        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES</span>
         <div class="live-indicator">
             <span class="pulse-dot"></span>
-            <span>AO VIVO (1.0s)</span>
+            <span>AO VIVO</span>
         </div>
     </div>
 
+    <!-- Controles para Inserir Links -->
     <div class="controls">
         <div class="input-group">
-            <input type="text" id="scriptUrl" placeholder="Cole aqui a URL do App da Web (Google Apps Script)...">
-            <button onclick="carregarDadosManualmente()">Atualizar Agora</button>
-            <span id="lastUpdate" class="status-badge">Conectando...</span>
-        </div>
-    </div>
-
-    <div class="kpi-container">
-        <div class="kpi-card" style="border-color: #3B82F6;">
-            <div class="kpi-title">ÚLTIMO STATUS</div>
-            <div class="kpi-value" id="kpiStatus">--</div>
-        </div>
-        <div class="kpi-card" style="border-color: #10B981;">
-            <div class="kpi-title">ACELERAÇÃO MÁX. Z (g)</div>
-            <div class="kpi-value" id="kpiMaxZ">--</div>
-        </div>
-        <div class="kpi-card" style="border-color: #F59E0B;">
-            <div class="kpi-title">TOTAL ACUMULADO DE LEITURAS</div>
-            <div class="kpi-value" id="kpiLeituras">0</div>
-        </div>
-    </div>
-
-    <div class="charts-grid">
-        <div class="chart-card">
-            <canvas id="chartAceleracao"></canvas>
-        </div>
-        <div class="chart-card">
-            <canvas id="chartFFT"></canvas>
-        </div>
-    </div>
-
-    <div class="log-panel" id="logStatus">Status: Inicializando...</div>
-
-    <script>
-        let chartAcelInstance = null;
-        let totalLeiturasAcumuladas = 0;
-        let tamanhoUltimaLeitura = 0;
-
-        function setLog(msg) {
-            document.getElementById('logStatus').innerText = 'Status: ' + msg;
-        }
-
-        function parseNum(val) {
-            if (typeof val === 'number') return isNaN(val) ? 0 : val;
-            if (!val) return 0;
-            let n = parseFloat(String(val).replace(',', '.'));
-            return isNaN(n) ? 0 : n;
-        }
-
-        function inicializarGraficos() {
-            const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
-            chartAcelInstance = new Chart(ctxAcel, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [
-                        { label: 'Eixo X', data: [], borderColor: '#EF4444', borderWidth: 1.5, fill: false, pointRadius: 0 },
-                        { label: 'Eixo Y', data: [], borderColor: '#10B981', borderWidth: 1.5, fill: false, pointRadius: 0 },
-                        { label: 'Eixo Z', data: [], borderColor: '#3B82F6', borderWidth: 1.5, fill: false, pointRadius: 0 }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: false,
-                    plugins: {
-                        title: { display: true, text: 'Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' }
-                    },
-                    scales: {
-                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
-                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
-                    }
-                }
-            });
-        }
-
-        function carregarDadosManualmente() {
-            tamanhoUltimaLeitura = 0;
-            carregarDadosInstantaneos();
-        }
-
-        async function carregarDadosInstantaneos() {
-            let url = document.getElementById('scriptUrl').value.trim();
-            if (!url) {
-                setLog('Insira o Link do Apps Script para atualização em tempo real.');
-                return;
-            }
-
-            try {
-                let resp = await fetch(url + '?_t=' + new Date().getTime());
-                let rows = await resp.json();
-
-                // Remove o cabeçalho (linha 1)
-                if (rows.length <= 1) return;
-                let dadosValidos = rows.slice(1).filter(r => r.some(c => c !== ''));
-
-                const qtdAtual = dadosValidos.length;
-
-                if (qtdAtual > tamanhoUltimaLeitura) {
-                    const novas = qtdAtual - tamanhoUltimaLeitura;
-                    totalLeiturasAcumuladas += novas;
-                    tamanhoUltimaLeitura = qtdAtual;
-
-                    let tempos = [];
-                    let xArr = [], yArr = [], zArr = [];
-                    let maxZ = 0;
-                    let status = "Normal";
-
-                    dadosValidos.forEach((r, idx) => {
-                        let t = parseNum(r[0] || idx);
-                        let x = parseNum(r[1]);
-                        let y = parseNum(r[2]);
-                        let z = parseNum(r[3]);
-
-                        tempos.push(t);
-                        xArr.push(x);
-                        yArr.push(y);
-                        zArr.push(z);
-
-                        if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                        if (r[4]) status = r[4];
-                    });
-
-                    document.getElementById('kpiStatus').innerText = status;
-                    document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
-                    document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas;
-
-                    chartAcelInstance.data.labels = tempos;
-                    chartAcelInstance.data.datasets[0].data = xArr;
-                    chartAcelInstance.data.datasets[1].data = yArr;
-                    chartAcelInstance.data.datasets[2].data = zArr;
-                    chartAcelInstance.update('none');
-
-                    document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
-                    setLog(`Instantâneo: ${dadosValidos.length} linhas lidas sem atraso.`);
-                }
-            } catch (err) {
-                setLog('Erro ao buscar dados: ' + err.message);
-            }
-        }
-
-        window.onload = function() {
-            inicializarGraficos();
-            setInterval(carregarDadosInstantaneos, 1000); // Checa a cada 1 segundo sem atraso do Google
-        };
-    </script>
-</body>
-</html>
+            <input type="text" id="csvUrl" value="
