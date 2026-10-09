@@ -196,9 +196,10 @@
         let chartAcelInstance = null;
         let chartFFTInstance = null;
 
-        // Controle exclusivo da soma de leituras temporais
+        // Controle do somatório acumulado e leituras já processadas
         let totalLeiturasAcumuladas = 0;
-        let tamanhoUltimaLeituraDados = 0;
+        let tamanhoUltimaLeitura = 0;
+        let tamanhoUltimaLeituraFFT = 0;
 
         // Converte strings numéricas com ponto ou vírgula
         function parseNum(val) {
@@ -261,17 +262,11 @@
         }
 
         function carregarDadosManualmente() {
-            tamanhoUltimaLeituraDados = 0; // Reseta verificação para forçar atualização no clique
-            sincronizarTudo();
+            tamanhoUltimaLeitura = 0; // Força reprocessamento total ao clicar no botão
+            carregarDados();
         }
 
-        function sincronizarTudo() {
-            carregarDadosTemporais();
-            carregarDadosFFT();
-        }
-
-        // 1. CARREGA DADOS TEMPORAIS (Exclusivo responsável por somar no KPI)
-        function carregarDadosTemporais() {
+        function carregarDados() {
             let url = document.getElementById('csvUrl').value.trim();
             if (!url) return;
 
@@ -279,6 +274,7 @@
                 url = url.replace('pubhtml', 'pub') + '&output=csv';
             }
 
+            // Impede o cache do navegador adicionando timestamp
             const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
 
             Papa.parse(urlSemCache, {
@@ -287,26 +283,56 @@
                 skipEmptyLines: true,
                 complete: function(results) {
                     if (results.data && results.data.length > 0) {
-                        processarDadosTemporais(results.data);
+                        processarDados(results.data);
                         document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
                     }
                 },
                 error: function(err) {
-                    console.error('Erro ao ler planilha principal:', err);
+                    console.error('Erro na sincronização de dados:', err);
+                }
+            });
+
+            carregarDadosFFT(url);
+        }
+
+        function carregarDadosFFT(urlBase) {
+            let urlFft = document.getElementById('csvFftUrl').value.trim();
+
+            if (!urlFft) {
+                urlFft = urlBase.replace(/gid=\d+/, 'gid=0'); 
+            }
+
+            if (urlFft.includes('pubhtml')) {
+                urlFft = urlFft.replace('pubhtml', 'pub') + '&output=csv';
+            }
+
+            const urlFftSemCache = urlFft + (urlFft.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
+
+            Papa.parse(urlFftSemCache, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processarDadosFFT(results.data);
+                    }
+                },
+                error: function(err) {
+                    console.error('Erro nos dados da aba FFT:', err);
                 }
             });
         }
 
-        function processarDadosTemporais(data) {
+        function processarDados(data) {
             const quantidadeAtual = data.length;
 
-            // Só incrementa a soma se a quantidade de linhas da planilha aumentar
-            if (quantidadeAtual > tamanhoUltimaLeituraDados) {
-                const novosDadosCount = quantidadeAtual - tamanhoUltimaLeituraDados;
+            // Identifica se chegaram novos dados na planilha
+            if (quantidadeAtual > tamanhoUltimaLeitura) {
+                const novosDadosCount = quantidadeAtual - tamanhoUltimaLeitura;
                 
-                // SOMA APENAS OS NOVOS DADOS DA PLANILHA PRINCIPAL
+                // Soma a quantidade de novas leituras ao total
                 totalLeiturasAcumuladas += novosDadosCount;
-                tamanhoUltimaLeituraDados = quantidadeAtual;
+                tamanhoUltimaLeitura = quantidadeAtual;
 
                 let tempos = [];
                 let acelX = [];
@@ -332,12 +358,12 @@
                     }
                 });
 
-                // Atualização dos KPIs
+                // Atualização instantânea dos KPIs
                 document.getElementById('kpiStatus').innerText = ultimoStatus;
                 document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
                 document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
 
-                // Atualização do Gráfico Temporal
+                // Atualização do Gráfico sem recarregar o canvas inteiro
                 chartAcelInstance.data.labels = tempos;
                 chartAcelInstance.data.datasets[0].data = acelX;
                 chartAcelInstance.data.datasets[1].data = acelY;
@@ -346,64 +372,34 @@
             }
         }
 
-        // 2. CARREGA DADOS DA ABA FFT (Sem interferência no KPI de leituras)
-        function carregarDadosFFT() {
-            let urlBase = document.getElementById('csvUrl').value.trim();
-            let urlFft = document.getElementById('csvFftUrl').value.trim();
-
-            if (!urlFft && urlBase) {
-                urlFft = urlBase.replace(/gid=\d+/, 'gid=0'); 
-            }
-
-            if (!urlFft) return;
-
-            if (urlFft.includes('pubhtml')) {
-                urlFft = urlFft.replace('pubhtml', 'pub') + '&output=csv';
-            }
-
-            const urlFftSemCache = urlFft + (urlFft.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
-
-            Papa.parse(urlFftSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDadosFFT(results.data);
-                    }
-                },
-                error: function(err) {
-                    console.error('Erro ao ler aba FFT:', err);
-                }
-            });
-        }
-
         function processarDadosFFT(data) {
-            let frequencias = [];
-            let magnitudes = [];
+            if (data.length !== tamanhoUltimaLeituraFFT) {
+                tamanhoUltimaLeituraFFT = data.length;
+                let frequencias = [];
+                let magnitudes = [];
 
-            data.forEach(row => {
-                let freq = parseNum(row['Frequência (Hz)'] || row['Frequencia (Hz)'] || row['Frequência'] || row['Frequencia'] || row['Freq'] || 0);
-                let mag = parseNum(row['Magnitude'] || row['Magnitude (g)'] || row['Amplitude'] || row['Aceleração (g)'] || 0);
+                data.forEach(row => {
+                    let freq = parseNum(row['Frequência (Hz)'] || row['Frequencia (Hz)'] || row['Frequência'] || row['Frequencia'] || row['Freq'] || 0);
+                    let mag = parseNum(row['Magnitude'] || row['Magnitude (g)'] || row['Amplitude'] || row['Aceleração (g)'] || 0);
 
-                frequencias.push(freq.toFixed(2));
-                magnitudes.push(mag.toFixed(4));
-            });
+                    frequencias.push(freq.toFixed(2));
+                    magnitudes.push(mag.toFixed(4));
+                });
 
-            // Atualiza o gráfico de barras da FFT de forma totalmente independente
-            if (frequencias.length > 0) {
-                chartFFTInstance.data.labels = frequencias;
-                chartFFTInstance.data.datasets[0].data = magnitudes;
-                chartFFTInstance.update('none');
+                if (frequencias.length > 0) {
+                    chartFFTInstance.data.labels = frequencias;
+                    chartFFTInstance.data.datasets[0].data = magnitudes;
+                    chartFFTInstance.update('none');
+                }
             }
         }
 
-        // Execução Inicial
+        // Execução inicial
         inicializarGraficos();
-        sincronizarTudo();
+        carregarDados();
 
-        // Loop de checagem automática a cada 1.5 segundos (1500 ms)
-        setInterval(sincronizarTudo, 1500);
+        // Checagem automática constante a cada 1.5 segundos (1500 ms)
+        setInterval(carregarDados, 1500);
     </script>
 </body>
 </html>
