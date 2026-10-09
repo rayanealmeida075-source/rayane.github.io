@@ -1,358 +1,47 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Monitoramento Estrutural Ultra-Rápido</title>
-    <!-- Chart.js para geração de gráficos -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body {
-            background-color: #0F172A;
-            color: #F8FAFC;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-        }
+function processarDados(data) {
+    const quantidadeAtual = data.length;
 
-        .header {
-            background-color: #1E293B;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #F8FAFC;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+    // Identifica se chegaram novos dados ou se a quantidade mudou
+    if (quantidadeAtual !== tamanhoUltimaLeitura) {
+        tamanhoUltimaLeitura = quantidadeAtual;
+        
+        // Define o total exatamente como a quantidade de linhas da planilha
+        totalLeiturasAcumuladas = quantidadeAtual;
 
-        .live-indicator {
-            font-size: 0.85rem;
-            color: #10B981;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
+        let tempos = [];
+        let acelX = [];
+        let acelY = [];
+        let acelZ = [];
+        let maxZ = 0;
+        let ultimoStatus = "Normal";
 
-        .pulse-dot {
-            width: 10px;
-            height: 10px;
-            background-color: #10B981;
-            border-radius: 50%;
-            display: inline-block;
-            animation: pulse 1.5s infinite;
-        }
+        data.forEach(row => {
+            let t = parseNum(row['Tempo (s)'] || row['Tempo'] || 0);
+            let x = parseNum(row['Aceleração X (g)'] || row['Aceleração X'] || row['Aceleraçao X (g)'] || 0);
+            let y = parseNum(row['Aceleração Y (g)'] || row['Aceleração Y'] || row['Aceleraçao Y (g)'] || 0);
+            let z = parseNum(row['Aceleração Z (g)'] || row['Aceleração Z'] || row['Aceleraçao Z (g)'] || 0);
 
-        @keyframes pulse {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
+            tempos.push(t);
+            acelX.push(x);
+            acelY.push(y);
+            acelZ.push(z);
 
-        .kpi-container {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 20px;
-            justify-content: space-between;
-        }
-
-        .kpi-card {
-            background-color: #1E293B;
-            flex: 1;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            border-top: 4px solid #3B82F6;
-        }
-
-        .kpi-title {
-            font-size: 0.8rem;
-            color: #94A3B8;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-
-        .kpi-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-
-        .charts-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
-            gap: 20px;
-        }
-
-        .chart-card {
-            background-color: #1E293B;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-
-        canvas {
-            max-width: 100%;
-        }
-
-        .controls {
-            margin-bottom: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .input-group {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        input[type="text"] {
-            flex: 1;
-            padding: 10px;
-            border-radius: 5px;
-            border: 1px solid #334155;
-            background-color: #1E293B;
-            color: #FFF;
-        }
-
-        button {
-            padding: 10px 20px;
-            background-color: #3B82F6;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-
-        button:hover {
-            background-color: #2563EB;
-        }
-
-        .status-badge {
-            font-size: 0.85rem;
-            color: #10B981;
-            font-weight: 500;
-        }
-    </style>
-</head>
-<body>
-
-    <div class="header">
-        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES (ULTRA-RÁPIDO)</span>
-        <div class="live-indicator">
-            <span class="pulse-dot"></span>
-            <span>AO VIVO (API DIRETA)</span>
-        </div>
-    </div>
-
-    <!-- Campo para o Link do Web App do Apps Script -->
-    <div class="controls">
-        <div class="input-group">
-            <input type="text" id="webAppUrl" value="" placeholder="Cole aqui a URL do Apps Script Web App (https://script.google.com/macros/s/.../exec)">
-            <button onclick="carregarDadosManualmente()">Forçar Atualização</button>
-            <span id="lastUpdate" class="status-badge">Conectando...</span>
-        </div>
-    </div>
-
-    <!-- Indicadores KPI -->
-    <div class="kpi-container">
-        <div class="kpi-card" style="border-color: #3B82F6;">
-            <div class="kpi-title">ÚLTIMO STATUS</div>
-            <div class="kpi-value" id="kpiStatus">--</div>
-        </div>
-        <div class="kpi-card" style="border-color: #10B981;">
-            <div class="kpi-title">ACELERAÇÃO MÁX. Z (g)</div>
-            <div class="kpi-value" id="kpiMaxZ">--</div>
-        </div>
-        <div class="kpi-card" style="border-color: #F59E0B;">
-            <div class="kpi-title">TOTAL ACUMULADO DE LEITURAS</div>
-            <div class="kpi-value" id="kpiLeituras">0</div>
-        </div>
-    </div>
-
-    <!-- Seção dos Gráficos -->
-    <div class="charts-grid">
-        <div class="chart-card">
-            <canvas id="chartAceleracao"></canvas>
-        </div>
-        <div class="chart-card">
-            <canvas id="chartFFT"></canvas>
-        </div>
-    </div>
-
-    <script>
-        let chartAcelInstance = null;
-        let chartFFTInstance = null;
-
-        let totalLeiturasAcumuladas = 0;
-        let tamanhoUltimaLeitura = 0;
-        let tamanhoUltimaLeituraFFT = 0;
-        let isFetching = false;
-
-        function parseNum(val) {
-            if (typeof val === 'number') return val;
-            if (!val) return 0;
-            return parseFloat(String(val).replace(',', '.')) || 0;
-        }
-
-        function inicializarGraficos() {
-            const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
-            chartAcelInstance = new Chart(ctxAcel, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [
-                        { label: 'Eixo X', data: [], borderColor: '#EF4444', borderWidth: 1.5, fill: false, pointRadius: 0 },
-                        { label: 'Eixo Y', data: [], borderColor: '#10B981', borderWidth: 1.5, fill: false, pointRadius: 0 },
-                        { label: 'Eixo Z', data: [], borderColor: '#3B82F6', borderWidth: 1.5, fill: false, pointRadius: 0 }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    animation: false,
-                    plugins: {
-                        title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
-                        legend: { labels: { color: '#CBD5E1' } }
-                    },
-                    scales: {
-                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
-                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
-                    }
-                }
-            });
-
-            const ctxFFT = document.getElementById('chartFFT').getContext('2d');
-            chartFFTInstance = new Chart(ctxFFT, {
-                type: 'bar',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Magnitude (g)',
-                        data: [],
-                        backgroundColor: '#8B5CF6'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    animation: false,
-                    plugins: {
-                        title: { display: true, text: '2. Espectro de Frequência (Aba FFT)', color: '#F8FAFC' },
-                        legend: { display: false }
-                    },
-                    scales: {
-                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
-                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
-                    }
-                }
-            });
-        }
-
-        function carregarDadosManualmente() {
-            tamanhoUltimaLeitura = 0;
-            tamanhoUltimaLeituraFFT = 0;
-            carregarDados();
-        }
-
-        async function carregarDados() {
-            if (isFetching) return;
-            const url = document.getElementById('webAppUrl').value.trim();
-            if (!url) return;
-
-            isFetching = true;
-            try {
-                const response = await fetch(url + '?_t=' + Date.now());
-                const payload = await response.json();
-
-                if (payload.dados) processarDados(payload.dados);
-                if (payload.fft) processarDadosFFT(payload.fft);
-
-                document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
-            } catch (err) {
-                console.error('Erro ao buscar dados via Web App:', err);
-                document.getElementById('lastUpdate').innerText = 'Erro na sincronização';
-            } finally {
-                isFetching = false;
+            if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
+            if (row['Status'] || row['Status Estrutural']) {
+                ultimoStatus = row['Status'] || row['Status Estrutural'];
             }
-        }
+        });
 
-        function processarDados(data) {
-            const quantidadeAtual = data.length;
+        // Atualização instantânea dos KPIs
+        document.getElementById('kpiStatus').innerText = ultimoStatus;
+        document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
+        document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
 
-            if (quantidadeAtual !== tamanhoUltimaLeitura) {
-                tamanhoUltimaLeitura = quantidadeAtual;
-                totalLeiturasAcumuladas = quantidadeAtual;
-
-                let tempos = [];
-                let acelX = [];
-                let acelY = [];
-                let acelZ = [];
-                let maxZ = 0;
-                let ultimoStatus = "Normal";
-
-                data.forEach(row => {
-                    let t = parseNum(row['Tempo (s)'] || row['Tempo'] || 0);
-                    let x = parseNum(row['Aceleração X (g)'] || row['Aceleração X'] || row['Aceleraçao X (g)'] || 0);
-                    let y = parseNum(row['Aceleração Y (g)'] || row['Aceleração Y'] || row['Aceleraçao Y (g)'] || 0);
-                    let z = parseNum(row['Aceleração Z (g)'] || row['Aceleração Z'] || row['Aceleraçao Z (g)'] || 0);
-
-                    tempos.push(t);
-                    acelX.push(x);
-                    acelY.push(y);
-                    acelZ.push(z);
-
-                    if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                    if (row['Status'] || row['Status Estrutural']) {
-                        ultimoStatus = row['Status'] || row['Status Estrutural'];
-                    }
-                });
-
-                document.getElementById('kpiStatus').innerText = ultimoStatus;
-                document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
-                document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
-
-                chartAcelInstance.data.labels = tempos;
-                chartAcelInstance.data.datasets[0].data = acelX;
-                chartAcelInstance.data.datasets[1].data = acelY;
-                chartAcelInstance.data.datasets[2].data = acelZ;
-                chartAcelInstance.update('none');
-            }
-        }
-
-        function processarDadosFFT(data) {
-            if (data.length !== tamanhoUltimaLeituraFFT) {
-                tamanhoUltimaLeituraFFT = data.length;
-                let frequencias = [];
-                let magnitudes = [];
-
-                data.forEach(row => {
-                    let freq = parseNum(row['Frequência (Hz)'] || row['Frequencia (Hz)'] || row['Frequência'] || row['Frequencia'] || row['Freq'] || 0);
-                    let mag = parseNum(row['Magnitude'] || row['Magnitude (g)'] || row['Amplitude'] || row['Aceleração (g)'] || 0);
-
-                    frequencias.push(freq.toFixed(2));
-                    magnitudes.push(mag.toFixed(4));
-                });
-
-                if (frequencias.length > 0) {
-                    chartFFTInstance.data.labels = frequencias;
-                    chartFFTInstance.data.datasets[0].data = magnitudes;
-                    chartFFTInstance.update('none');
-                }
-            }
-        }
-
-        // Inicialização
-        inicializarGraficos();
-        carregarDados();
-
-        // Intervalo de verificação super rápido (1 segundo)
-        setInterval(carregarDados, 1000);
-    </script>
-</body>
-</html>
+        // Atualização do Gráfico
+        chartAcelInstance.data.labels = tempos;
+        chartAcelInstance.data.datasets[0].data = acelX;
+        chartAcelInstance.data.datasets[1].data = acelY;
+        chartAcelInstance.data.datasets[2].data = acelZ;
+        chartAcelInstance.update('none');
+    }
+}
