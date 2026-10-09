@@ -148,4 +148,262 @@
 
     <div class="header">
         <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES</span>
-        <div class="
+        <div class="live-indicator">
+            <span class="pulse-dot"></span>
+            <span>AO VIVO</span>
+        </div>
+    </div>
+
+    <!-- Campo para inserir os Links dos CSVs das Planilhas -->
+    <div class="controls">
+        <div class="input-group">
+            <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Link do CSV da Aba de Dados...">
+        </div>
+        <div class="input-group">
+            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional, gerado auto se vazio)...">
+            <button onclick="carregarDadosManualmente()">Forçar Atualização</button>
+            <span id="lastUpdate" class="status-badge">Conectando...</span>
+        </div>
+    </div>
+
+    <!-- Indicadores KPI -->
+    <div class="kpi-container">
+        <div class="kpi-card" style="border-color: #3B82F6;">
+            <div class="kpi-title">ÚLTIMO STATUS</div>
+            <div class="kpi-value" id="kpiStatus">--</div>
+        </div>
+        <div class="kpi-card" style="border-color: #10B981;">
+            <div class="kpi-title">ACELERAÇÃO MÁX. Z (g)</div>
+            <div class="kpi-value" id="kpiMaxZ">--</div>
+        </div>
+        <div class="kpi-card" style="border-color: #F59E0B;">
+            <div class="kpi-title">TOTAL ACUMULADO DE LEITURAS</div>
+            <div class="kpi-value" id="kpiLeituras">0</div>
+        </div>
+    </div>
+
+    <!-- Seção dos Gráficos -->
+    <div class="charts-grid">
+        <div class="chart-card">
+            <canvas id="chartAceleracao"></canvas>
+        </div>
+        <div class="chart-card">
+            <canvas id="chartFFT"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let chartAcelInstance = null;
+        let chartFFTInstance = null;
+
+        // Controle exclusivo da soma de leituras temporais
+        let totalLeiturasAcumuladas = 0;
+        let tamanhoUltimaLeituraDados = 0;
+
+        // Converte strings numéricas com ponto ou vírgula
+        function parseNum(val) {
+            if (typeof val === 'number') return val;
+            if (!val) return 0;
+            return parseFloat(String(val).replace(',', '.')) || 0;
+        }
+
+        // Inicialização dos gráficos
+        function inicializarGraficos() {
+            const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
+            chartAcelInstance = new Chart(ctxAcel, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'Eixo X', data: [], borderColor: '#EF4444', borderWidth: 1.5, fill: false, pointRadius: 0 },
+                        { label: 'Eixo Y', data: [], borderColor: '#10B981', borderWidth: 1.5, fill: false, pointRadius: 0 },
+                        { label: 'Eixo Z', data: [], borderColor: '#3B82F6', borderWidth: 1.5, fill: false, pointRadius: 0 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    animation: false,
+                    plugins: {
+                        title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
+                        legend: { labels: { color: '#CBD5E1' } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
+                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
+                    }
+                }
+            });
+
+            const ctxFFT = document.getElementById('chartFFT').getContext('2d');
+            chartFFTInstance = new Chart(ctxFFT, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Magnitude (g)',
+                        data: [],
+                        backgroundColor: '#8B5CF6'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    animation: false,
+                    plugins: {
+                        title: { display: true, text: '2. Espectro de Frequência (Aba FFT)', color: '#F8FAFC' },
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
+                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
+                    }
+                }
+            });
+        }
+
+        function carregarDadosManualmente() {
+            tamanhoUltimaLeituraDados = 0; // Reseta verificação para forçar atualização no clique
+            sincronizarTudo();
+        }
+
+        function sincronizarTudo() {
+            carregarDadosTemporais();
+            carregarDadosFFT();
+        }
+
+        // 1. CARREGA DADOS TEMPORAIS (Exclusivo responsável por somar no KPI)
+        function carregarDadosTemporais() {
+            let url = document.getElementById('csvUrl').value.trim();
+            if (!url) return;
+
+            if (url.includes('pubhtml')) {
+                url = url.replace('pubhtml', 'pub') + '&output=csv';
+            }
+
+            const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
+
+            Papa.parse(urlSemCache, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processarDadosTemporais(results.data);
+                        document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
+                    }
+                },
+                error: function(err) {
+                    console.error('Erro ao ler planilha principal:', err);
+                }
+            });
+        }
+
+        function processarDadosTemporais(data) {
+            const quantidadeAtual = data.length;
+
+            // Só incrementa a soma se a quantidade de linhas da planilha aumentar
+            if (quantidadeAtual > tamanhoUltimaLeituraDados) {
+                const novosDadosCount = quantidadeAtual - tamanhoUltimaLeituraDados;
+                
+                // SOMA APENAS OS NOVOS DADOS DA PLANILHA PRINCIPAL
+                totalLeiturasAcumuladas += novosDadosCount;
+                tamanhoUltimaLeituraDados = quantidadeAtual;
+
+                let tempos = [];
+                let acelX = [];
+                let acelY = [];
+                let acelZ = [];
+                let maxZ = 0;
+                let ultimoStatus = "Normal";
+
+                data.forEach(row => {
+                    let t = parseNum(row['Tempo (s)'] || row['Tempo'] || 0);
+                    let x = parseNum(row['Aceleração X (g)'] || row['Aceleração X'] || row['Aceleraçao X (g)'] || 0);
+                    let y = parseNum(row['Aceleração Y (g)'] || row['Aceleração Y'] || row['Aceleraçao Y (g)'] || 0);
+                    let z = parseNum(row['Aceleração Z (g)'] || row['Aceleração Z'] || row['Aceleraçao Z (g)'] || 0);
+
+                    tempos.push(t);
+                    acelX.push(x);
+                    acelY.push(y);
+                    acelZ.push(z);
+
+                    if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
+                    if (row['Status'] || row['Status Estrutural']) {
+                        ultimoStatus = row['Status'] || row['Status Estrutural'];
+                    }
+                });
+
+                // Atualização dos KPIs
+                document.getElementById('kpiStatus').innerText = ultimoStatus;
+                document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
+                document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
+
+                // Atualização do Gráfico Temporal
+                chartAcelInstance.data.labels = tempos;
+                chartAcelInstance.data.datasets[0].data = acelX;
+                chartAcelInstance.data.datasets[1].data = acelY;
+                chartAcelInstance.data.datasets[2].data = acelZ;
+                chartAcelInstance.update('none');
+            }
+        }
+
+        // 2. CARREGA DADOS DA ABA FFT (Sem interferência no KPI de leituras)
+        function carregarDadosFFT() {
+            let urlBase = document.getElementById('csvUrl').value.trim();
+            let urlFft = document.getElementById('csvFftUrl').value.trim();
+
+            if (!urlFft && urlBase) {
+                urlFft = urlBase.replace(/gid=\d+/, 'gid=0'); 
+            }
+
+            if (!urlFft) return;
+
+            if (urlFft.includes('pubhtml')) {
+                urlFft = urlFft.replace('pubhtml', 'pub') + '&output=csv';
+            }
+
+            const urlFftSemCache = urlFft + (urlFft.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
+
+            Papa.parse(urlFftSemCache, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processarDadosFFT(results.data);
+                    }
+                },
+                error: function(err) {
+                    console.error('Erro ao ler aba FFT:', err);
+                }
+            });
+        }
+
+        function processarDadosFFT(data) {
+            let frequencias = [];
+            let magnitudes = [];
+
+            data.forEach(row => {
+                let freq = parseNum(row['Frequência (Hz)'] || row['Frequencia (Hz)'] || row['Frequência'] || row['Frequencia'] || row['Freq'] || 0);
+                let mag = parseNum(row['Magnitude'] || row['Magnitude (g)'] || row['Amplitude'] || row['Aceleração (g)'] || 0);
+
+                frequencias.push(freq.toFixed(2));
+                magnitudes.push(mag.toFixed(4));
+            });
+
+            // Atualiza o gráfico de barras da FFT de forma totalmente independente
+            if (frequencias.length > 0) {
+                chartFFTInstance.data.labels = frequencias;
+                chartFFTInstance.data.datasets[0].data = magnitudes;
+                chartFFTInstance.update('none');
+            }
+        }
+
+        // Execução Inicial
+        inicializarGraficos();
+        sincronizarTudo();
+
+        // Loop de checagem automática a cada 1.5 segundos (1500 ms)
+        setInterval(sincronizarTudo, 1500);
+    </script>
+</body>
+</html>
