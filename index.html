@@ -9,22 +9,20 @@ function parseNum(val) {
     return parseFloat(String(val).replace(',', '.')) || 0;
 }
 
-// Substitua esta URL pela URL do Web App que você copiou do Apps Script
+// Coloque aqui o URL do Apps Script que criou no Passo 1
 const WEB_APP_URL = "SUA_URL_DO_APPS_SCRIPT_AQUI";
 
 async function carregarDados() {
     if (isFetching) return;
     
-    // Pega a URL do input ou usa a padrão
     let url = document.getElementById('csvUrl').value.trim();
     if (!url || url.includes('docs.google.com/spreadsheets')) {
-        url = WEB_APP_URL; // Se for o link normal do sheets, usa a API direta
+        url = WEB_APP_URL;
     }
 
     isFetching = true;
 
     try {
-        // O Date.now() força o navegador a buscar a linha mais recente sem guardar cache
         const response = await fetch(url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now());
         const data = await response.json();
 
@@ -33,7 +31,7 @@ async function carregarDados() {
             document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
         }
     } catch (err) {
-        console.error('Aguardando novos dados ou erro de conexão:', err);
+        console.error('Erro ao procurar novos dados:', err);
     } finally {
         isFetching = false;
     }
@@ -42,7 +40,6 @@ async function carregarDados() {
 function processarDados(data) {
     const quantidadeAtual = data.length;
 
-    // Atualiza apenas se o número de linhas mudou na planilha
     if (quantidadeAtual !== tamanhoUltimaLeitura) {
         tamanhoUltimaLeitura = quantidadeAtual;
 
@@ -70,12 +67,10 @@ function processarDados(data) {
             }
         });
 
-        // Atualiza os cartões de KPI com os dados exatos e sem acumular duplicado
         document.getElementById('kpiStatus').innerText = ultimoStatus;
         document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
         document.getElementById('kpiLeituras').innerText = quantidadeAtual.toLocaleString('pt-BR');
 
-        // Atualiza o gráfico de linha sem recarregar o canvas inteiro
         chartAcelInstance.data.labels = tempos;
         chartAcelInstance.data.datasets[0].data = acelX;
         chartAcelInstance.data.datasets[1].data = acelY;
@@ -84,5 +79,5 @@ function processarDados(data) {
     }
 }
 
-// Execução a cada 1 segundo
+// Verificação a cada 1 segundo
 setInterval(carregarDados, 1000);
