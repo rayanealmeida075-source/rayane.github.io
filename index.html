@@ -3,11 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Monitoramento Estrutural em Tempo Real</title>
+    <title>Painel de Monitoramento Estrutural Ultra-Rápido</title>
     <!-- Chart.js para geração de gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- PapaParse para leitura fácil de arquivos CSV -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
         body {
             background-color: #0F172A;
@@ -147,20 +145,17 @@
 <body>
 
     <div class="header">
-        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES</span>
+        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES (ULTRA-RÁPIDO)</span>
         <div class="live-indicator">
             <span class="pulse-dot"></span>
-            <span>AO VIVO</span>
+            <span>AO VIVO (API DIRETA)</span>
         </div>
     </div>
 
-    <!-- Campo para inserir os Links dos CSVs das Planilhas -->
+    <!-- Campo para o Link do Web App do Apps Script -->
     <div class="controls">
         <div class="input-group">
-            <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Link do CSV da Aba de Dados...">
-        </div>
-        <div class="input-group">
-            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional, gerado auto se vazio)...">
+            <input type="text" id="webAppUrl" value="" placeholder="Cole aqui a URL do Apps Script Web App (https://script.google.com/macros/s/.../exec)">
             <button onclick="carregarDadosManualmente()">Forçar Atualização</button>
             <span id="lastUpdate" class="status-badge">Conectando...</span>
         </div>
@@ -196,19 +191,17 @@
         let chartAcelInstance = null;
         let chartFFTInstance = null;
 
-        // Controle do somatório acumulado e leituras já processadas
         let totalLeiturasAcumuladas = 0;
         let tamanhoUltimaLeitura = 0;
         let tamanhoUltimaLeituraFFT = 0;
+        let isFetching = false;
 
-        // Converte strings numéricas com ponto ou vírgula
         function parseNum(val) {
             if (typeof val === 'number') return val;
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.')) || 0;
         }
 
-        // Inicialização dos gráficos
         function inicializarGraficos() {
             const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
             chartAcelInstance = new Chart(ctxAcel, {
@@ -262,77 +255,39 @@
         }
 
         function carregarDadosManualmente() {
-            tamanhoUltimaLeitura = 0; // Força reprocessamento total ao clicar no botão
+            tamanhoUltimaLeitura = 0;
+            tamanhoUltimaLeituraFFT = 0;
             carregarDados();
         }
 
-        function carregarDados() {
-            let url = document.getElementById('csvUrl').value.trim();
+        async function carregarDados() {
+            if (isFetching) return;
+            const url = document.getElementById('webAppUrl').value.trim();
             if (!url) return;
 
-            if (url.includes('pubhtml')) {
-                url = url.replace('pubhtml', 'pub') + '&output=csv';
+            isFetching = true;
+            try {
+                const response = await fetch(url + '?_t=' + Date.now());
+                const payload = await response.json();
+
+                if (payload.dados) processarDados(payload.dados);
+                if (payload.fft) processarDadosFFT(payload.fft);
+
+                document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
+            } catch (err) {
+                console.error('Erro ao buscar dados via Web App:', err);
+                document.getElementById('lastUpdate').innerText = 'Erro na sincronização';
+            } finally {
+                isFetching = false;
             }
-
-            // Impede o cache do navegador adicionando timestamp
-            const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
-
-            Papa.parse(urlSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDados(results.data);
-                        document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
-                    }
-                },
-                error: function(err) {
-                    console.error('Erro na sincronização de dados:', err);
-                }
-            });
-
-            carregarDadosFFT(url);
-        }
-
-        function carregarDadosFFT(urlBase) {
-            let urlFft = document.getElementById('csvFftUrl').value.trim();
-
-            if (!urlFft) {
-                urlFft = urlBase.replace(/gid=\d+/, 'gid=0'); 
-            }
-
-            if (urlFft.includes('pubhtml')) {
-                urlFft = urlFft.replace('pubhtml', 'pub') + '&output=csv';
-            }
-
-            const urlFftSemCache = urlFft + (urlFft.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
-
-            Papa.parse(urlFftSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDadosFFT(results.data);
-                    }
-                },
-                error: function(err) {
-                    console.error('Erro nos dados da aba FFT:', err);
-                }
-            });
         }
 
         function processarDados(data) {
             const quantidadeAtual = data.length;
 
-            // Identifica se chegaram novos dados na planilha
-            if (quantidadeAtual > tamanhoUltimaLeitura) {
-                const novosDadosCount = quantidadeAtual - tamanhoUltimaLeitura;
-                
-                // Soma a quantidade de novas leituras ao total
-                totalLeiturasAcumuladas += novosDadosCount;
+            if (quantidadeAtual !== tamanhoUltimaLeitura) {
                 tamanhoUltimaLeitura = quantidadeAtual;
+                totalLeiturasAcumuladas = quantidadeAtual;
 
                 let tempos = [];
                 let acelX = [];
@@ -358,12 +313,10 @@
                     }
                 });
 
-                // Atualização instantânea dos KPIs
                 document.getElementById('kpiStatus').innerText = ultimoStatus;
                 document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
                 document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
 
-                // Atualização do Gráfico sem recarregar o canvas inteiro
                 chartAcelInstance.data.labels = tempos;
                 chartAcelInstance.data.datasets[0].data = acelX;
                 chartAcelInstance.data.datasets[1].data = acelY;
@@ -394,12 +347,12 @@
             }
         }
 
-        // Execução inicial
+        // Inicialização
         inicializarGraficos();
         carregarDados();
 
-        // Checagem automática constante a cada 1.5 segundos (1500 ms)
-        setInterval(carregarDados, 1500);
+        // Intervalo de verificação super rápido (1 segundo)
+        setInterval(carregarDados, 1000);
     </script>
 </body>
 </html>
