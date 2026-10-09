@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Monitoramento Estrutural</title>
+    <title>Painel de Monitoramento Estrutural Ultra Fast</title>
     <!-- Chart.js para geração de gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- PapaParse para leitura fácil de arquivos CSV -->
+    <!-- PapaParse para fallback via CSV -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
         * {
@@ -51,12 +51,12 @@
             background-color: #10B981;
             border-radius: 50%;
             display: inline-block;
-            animation: pulse 1.5s infinite;
+            animation: pulse 1s infinite;
         }
 
         @keyframes pulse {
             0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            70% { transform: scale(1.1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
             100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
 
@@ -73,7 +73,7 @@
             align-items: center;
         }
 
-        input[type="text"] {
+        input[type="text"], select {
             flex: 1;
             padding: 10px;
             border-radius: 5px;
@@ -90,6 +90,7 @@
             border-radius: 5px;
             cursor: pointer;
             font-weight: bold;
+            transition: background 0.2s;
         }
 
         button:hover {
@@ -152,23 +153,30 @@
             background: #1E293B;
             padding: 10px;
             border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
         }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES</span>
+        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES (ULTRA-FAST)</span>
         <div class="live-indicator">
             <span class="pulse-dot"></span>
-            <span>AO VIVO</span>
+            <span>TEMPO REAL</span>
         </div>
     </div>
 
-    <!-- Controles para Inserir Links -->
+    <!-- Controles para Inserir Links e Frequência de Varredura -->
     <div class="controls">
         <div class="input-group">
-            <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vRxYvgf_Qo-6dJWXBzVg-_QXo9WeDNCFct6COPkWpEX1pZJVqJzrXLOWj1roJCPeJlsgfmJDCSd7tgX/pub?gid=1860750382&single=true&output=csv" placeholder="Link do CSV da Aba de Dados...">
+            <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vRxYvgf_Qo-6dJWXBzVg-_QXo9WeDNCFct6COPkWpEX1pZJVqJzrXLOWj1roJCPeJlsgfmJDCSd7tgX/pub?gid=1860750382&single=true&output=csv" placeholder="Link do CSV ou URL da Planilha...">
+            <select id="updateInterval" onchange="alterarIntervalo()">
+                <option value="500">Atualizar: 0.5s (Ultra)</option>
+                <option value="1000" selected>Atualizar: 1.0s (Rápido)</option>
+                <option value="2000">Atualizar: 2.0s (Normal)</option>
+            </select>
         </div>
         <div class="input-group">
             <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional)...">
@@ -203,7 +211,10 @@
         </div>
     </div>
 
-    <div class="log-panel" id="logStatus">Status: Inicializando sistema...</div>
+    <div class="log-panel">
+        <span id="logStatus">Status: Inicializando sistema...</span>
+        <span id="latencyStatus">Latência: -- ms</span>
+    </div>
 
     <script>
         let chartAcelInstance = null;
@@ -211,6 +222,8 @@
 
         let totalLeiturasAcumuladas = 0;
         let tamanhoUltimaLeituraDados = 0;
+        let intervalId = null;
+        let isFetching = false;
 
         function setLog(msg) {
             document.getElementById('logStatus').innerText = 'Status: ' + msg;
@@ -221,6 +234,23 @@
             if (!val) return 0;
             let n = parseFloat(String(val).replace(',', '.'));
             return isNaN(n) ? 0 : n;
+        }
+
+        function extrairSpreadsheetDetails(url) {
+            let cleanUrl = url.trim();
+            // Tenta extrair ID do documento e GID da aba para busca via Google API Direct
+            const matchDocId = cleanUrl.match(/\/d\/e\/([^\/]+)/) || cleanUrl.match(/\/d\/([^\/]+)/);
+            const matchGid = cleanUrl.match(/gid=([0-9]+)/);
+
+            if (matchDocId && matchGid) {
+                return {
+                    docId: matchDocId[1],
+                    gid: matchGid[1],
+                    // constrói endpoint JSON ultra rápido do Google Visualization Query Protocol
+                    gvizUrl: `https://docs.google.com/spreadsheets/d/${matchDocId[1]}/gviz/tq?tqx=out:json&gid=${matchGid[1]}`
+                };
+            }
+            return null;
         }
 
         function formatarUrlCSV(url) {
@@ -252,6 +282,7 @@
                         responsive: true,
                         maintainAspectRatio: false,
                         animation: false,
+                        parsing: false, // Performance boost para dados em tempo real
                         plugins: {
                             title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
                             legend: { labels: { color: '#CBD5E1' } }
@@ -288,7 +319,7 @@
                         }
                     }
                 });
-                setLog('Gráficos prontos. Aguardando leitura das planilhas...');
+                setLog('Gráficos prontos. Aguardando sincronização ultra-rápida...');
             } catch (e) {
                 setLog('Erro ao criar estrutura gráfica: ' + e.message);
             }
@@ -299,76 +330,110 @@
             sincronizarTudo();
         }
 
-        function sincronizarTudo() {
-            carregarDadosTemporais();
-            carregarDadosFFT();
+        async function sincronizarTudo() {
+            if (isFetching) return;
+            isFetching = true;
+            const startTime = performance.now();
+
+            try {
+                await Promise.all([carregarDadosTemporais(), carregarDadosFFT()]);
+                const endTime = performance.now();
+                document.getElementById('latencyStatus').innerText = `Latência: ${Math.round(endTime - startTime)} ms`;
+            } catch (e) {
+                console.error(e);
+            } finally {
+                isFetching = false;
+            }
         }
 
-        function carregarDadosTemporais() {
-            let url = formatarUrlCSV(document.getElementById('csvUrl').value);
-            if (!url) return;
+        async function carregarDadosTemporais() {
+            let inputUrl = document.getElementById('csvUrl').value;
+            if (!inputUrl) return;
 
-            if (typeof Papa === 'undefined') {
-                setLog('Erro: Biblioteca PapaParse não carregada.');
-                return;
+            let details = extrairSpreadsheetDetails(inputUrl);
+
+            // Método High-Speed (Fetch Direct JSON via GViz Protocol API)
+            if (details && details.gvizUrl) {
+                try {
+                    const response = await fetch(`${details.gvizUrl}&_nocache=${Date.now()}`, { cache: 'no-store' });
+                    const text = await response.text();
+                    
+                    // O GViz retorna no formato google.visualization.Query.setResponse({...});
+                    const jsonString = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);/);
+                    if (jsonString && jsonString[1]) {
+                        const dataObj = JSON.parse(jsonString[1]);
+                        if (dataObj.status === 'ok' && dataObj.table) {
+                            processarGvizDataTemporais(dataObj.table);
+                            document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
+                            return;
+                        }
+                    }
+                } catch (err) {
+                    console.warn("Fallback para CSV padrão ativo.");
+                }
             }
 
-            const urlSemCache = url + '&_t=' + new Date().getTime();
+            // Fallback via PapaParse (com otimização de Cache Bypass)
+            let url = formatarUrlCSV(inputUrl);
+            const urlSemCache = url + '&_t=' + Date.now();
 
-            Papa.parse(urlSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDadosTemporais(results.data);
-                        document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
+            return new Promise((resolve) => {
+                Papa.parse(urlSemCache, {
+                    download: true,
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        if (results.data && results.data.length > 0) {
+                            processarDadosTemporais(results.data);
+                            document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
+                        }
+                        resolve();
+                    },
+                    error: function() {
+                        setLog('Erro de conexão com o CSV da aba de Dados.');
+                        resolve();
                     }
-                },
-                error: function(err) {
-                    setLog('Erro de conexão com o CSV da aba de Dados.');
-                }
+                });
             });
         }
 
-        function processarDadosTemporais(rawGroup) {
-            // Filtra e mantêm apenas as linhas que contêm valores numéricos válidos (descarta cabeçalhos ou linhas vazias)
-            const linhasValidas = rawGroup.filter(row => {
-                let keys = Object.keys(row);
-                let temValores = keys.some(k => {
-                    let val = String(row[k]).trim();
-                    return val !== '' && !isNaN(parseFloat(val.replace(',', '.')));
-                });
-                return temValores;
-            });
+        function processarGvizDataTemporais(table) {
+            if (!table.rows || table.rows.length === 0) return;
 
-            const quantidadeAtual = linhasValidas.length;
+            const cols = table.cols.map(c => (c.label || '').toLowerCase());
+            
+            let idxTempo = cols.findIndex(c => c.includes('tempo') || c.includes('time'));
+            let idxX = cols.findIndex(c => c.includes('x'));
+            let idxY = cols.findIndex(c => c.includes('y'));
+            let idxZ = cols.findIndex(c => c.includes('z'));
+            let idxStatus = cols.findIndex(c => c.includes('status'));
 
-            if (quantidadeAtual > tamanhoUltimaLeituraDados) {
-                const novosDadosCount = quantidadeAtual - tamanhoUltimaLeituraDados;
+            if (idxX === -1) idxX = 1;
+            if (idxY === -1) idxY = 2;
+            if (idxZ === -1) idxZ = 3;
+
+            let tempos = [];
+            let acelX = [];
+            let acelY = [];
+            let acelZ = [];
+            let maxZ = 0;
+            let ultimoStatus = "Normal";
+
+            let linhasValidasCount = 0;
+
+            table.rows.forEach((r, idx) => {
+                if (!r.c) return;
                 
-                // Soma exata das novas linhas de dados filtradas
-                totalLeiturasAcumuladas += novosDadosCount;
-                tamanhoUltimaLeituraDados = quantidadeAtual;
+                let valX = r.c[idxX] ? r.c[idxX].v : null;
+                let valY = r.c[idxY] ? r.c[idxY].v : null;
+                let valZ = r.c[idxZ] ? r.c[idxZ].v : null;
 
-                let tempos = [];
-                let acelX = [];
-                let acelY = [];
-                let acelZ = [];
-                let maxZ = 0;
-                let ultimoStatus = "Normal";
-
-                linhasValidas.forEach((row, idx) => {
-                    let keys = Object.keys(row);
-                    let getVal = (nomes) => {
-                        let k = keys.find(key => nomes.some(n => key.toLowerCase().includes(n.toLowerCase())));
-                        return k ? row[k] : null;
-                    };
-
-                    let t = parseNum(getVal(['tempo', 'time']) || idx);
-                    let x = parseNum(getVal(['aceleração x', 'aceleraçao x', 'eixo x', 'x']));
-                    let y = parseNum(getVal(['aceleração y', 'aceleraçao y', 'eixo y', 'y']));
-                    let z = parseNum(getVal(['aceleração z', 'aceleraçao z', 'eixo z', 'z']));
+                if (valX !== null || valY !== null || valZ !== null) {
+                    linhasValidasCount++;
+                    let t = parseNum(idxTempo !== -1 && r.c[idxTempo] ? r.c[idxTempo].v : idx);
+                    let x = parseNum(valX);
+                    let y = parseNum(valY);
+                    let z = parseNum(valZ);
 
                     tempos.push(t);
                     acelX.push(x);
@@ -376,9 +441,63 @@
                     acelZ.push(z);
 
                     if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                    let st = getVal(['status']);
-                    if (st) ultimoStatus = st;
+                    if (idxStatus !== -1 && r.c[idxStatus] && r.c[idxStatus].v) {
+                        ultimoStatus = r.c[idxStatus].v;
+                    }
+                }
+            });
+
+            atualizarPainelEGrafico(linhasValidasCount, tempos, acelX, acelY, acelZ, maxZ, ultimoStatus);
+        }
+
+        function processarDadosTemporais(rawGroup) {
+            const linhasValidas = rawGroup.filter(row => {
+                let keys = Object.keys(row);
+                return keys.some(k => {
+                    let val = String(row[k]).trim();
+                    return val !== '' && !isNaN(parseFloat(val.replace(',', '.')));
                 });
+            });
+
+            let tempos = [];
+            let acelX = [];
+            let acelY = [];
+            let acelZ = [];
+            let maxZ = 0;
+            let ultimoStatus = "Normal";
+
+            linhasValidas.forEach((row, idx) => {
+                let keys = Object.keys(row);
+                let getVal = (nomes) => {
+                    let k = keys.find(key => nomes.some(n => key.toLowerCase().includes(n.toLowerCase())));
+                    return k ? row[k] : null;
+                };
+
+                let t = parseNum(getVal(['tempo', 'time']) || idx);
+                let x = parseNum(getVal(['aceleração x', 'aceleraçao x', 'eixo x', 'x']));
+                let y = parseNum(getVal(['aceleração y', 'aceleraçao y', 'eixo y', 'y']));
+                let z = parseNum(getVal(['aceleração z', 'aceleraçao z', 'eixo z', 'z']));
+
+                tempos.push(t);
+                acelX.push(x);
+                acelY.push(y);
+                acelZ.push(z);
+
+                if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
+                let st = getVal(['status']);
+                if (st) ultimoStatus = st;
+            });
+
+            atualizarPainelEGrafico(linhasValidas.length, tempos, acelX, acelY, acelZ, maxZ, ultimoStatus);
+        }
+
+        function atualizarPainelEGrafico(quantidadeAtual, tempos, acelX, acelY, acelZ, maxZ, ultimoStatus) {
+            if (quantidadeAtual >= tamanhoUltimaLeituraDados) {
+                if (quantidadeAtual > tamanhoUltimaLeituraDados) {
+                    const novosDadosCount = quantidadeAtual - tamanhoUltimaLeituraDados;
+                    totalLeiturasAcumuladas += novosDadosCount;
+                    tamanhoUltimaLeituraDados = quantidadeAtual;
+                }
 
                 document.getElementById('kpiStatus').innerText = ultimoStatus;
                 document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
@@ -389,28 +508,33 @@
                     chartAcelInstance.data.datasets[0].data = acelX;
                     chartAcelInstance.data.datasets[1].data = acelY;
                     chartAcelInstance.data.datasets[2].data = acelZ;
-                    chartAcelInstance.update('none');
+                    chartAcelInstance.update('none'); // Renderização direta sem animação
                 }
 
-                setLog(`Sincronizado! ${linhasValidas.length} leituras de dados processadas.`);
+                setLog(`Sincronizado! ${quantidadeAtual} leituras processadas.`);
             }
         }
 
-        function carregarDadosFFT() {
-            let urlFft = formatarUrlCSV(document.getElementById('csvFftUrl').value);
-            if (!urlFft) return;
+        async function carregarDadosFFT() {
+            let inputUrlFft = document.getElementById('csvFftUrl').value;
+            if (!inputUrlFft) return;
 
-            const urlSemCache = urlFft + '&_t=' + new Date().getTime();
+            let urlFft = formatarUrlCSV(inputUrlFft);
+            const urlSemCache = urlFft + '&_t=' + Date.now();
 
-            Papa.parse(urlSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDadosFFT(results.data);
-                    }
-                }
+            return new Promise((resolve) => {
+                Papa.parse(urlSemCache, {
+                    download: true,
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        if (results.data && results.data.length > 0) {
+                            processarDadosFFT(results.data);
+                        }
+                        resolve();
+                    },
+                    error: resolve
+                });
             });
         }
 
@@ -439,11 +563,18 @@
             }
         }
 
+        function alterarIntervalo() {
+            const val = parseInt(document.getElementById('updateInterval').value) || 1000;
+            if (intervalId) clearInterval(intervalId);
+            intervalId = setInterval(sincronizarTudo, val);
+            setLog(`Frequência ajustada para ${val}ms.`);
+        }
+
         // Execução principal
         window.onload = function() {
             inicializarGraficos();
             sincronizarTudo();
-            setInterval(sincronizarTudo, 1500);
+            alterarIntervalo();
         };
     </script>
 </body>
