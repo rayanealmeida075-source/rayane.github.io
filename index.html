@@ -3,16 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Monitoramento Estrutural Ultra Fast</title>
-    <!-- Chart.js para geração de gráficos -->
+    <title>Painel de Monitoramento Estrutural - Tempo Real</title>
+    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- PapaParse para fallback via CSV -->
+    <!-- PapaParse -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
+        * { box-sizing: border-box; }
         body {
             background-color: #0F172A;
             color: #F8FAFC;
@@ -20,7 +17,6 @@
             margin: 0;
             padding: 20px;
         }
-
         .header {
             background-color: #1E293B;
             padding: 15px;
@@ -35,7 +31,6 @@
             justify-content: space-between;
             align-items: center;
         }
-
         .live-indicator {
             font-size: 0.85rem;
             color: #10B981;
@@ -44,35 +39,30 @@
             align-items: center;
             gap: 6px;
         }
-
         .pulse-dot {
             width: 10px;
             height: 10px;
             background-color: #10B981;
             border-radius: 50%;
             display: inline-block;
-            animation: pulse 1s infinite;
+            animation: pulse 1.5s infinite;
         }
-
         @keyframes pulse {
             0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { transform: scale(1.1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
             100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
-
         .controls {
             margin-bottom: 20px;
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
-
         .input-group {
             display: flex;
             gap: 10px;
             align-items: center;
         }
-
         input[type="text"], select {
             flex: 1;
             padding: 10px;
@@ -81,7 +71,6 @@
             background-color: #1E293B;
             color: #FFF;
         }
-
         button {
             padding: 10px 20px;
             background-color: #3B82F6;
@@ -90,26 +79,19 @@
             border-radius: 5px;
             cursor: pointer;
             font-weight: bold;
-            transition: background 0.2s;
         }
-
-        button:hover {
-            background-color: #2563EB;
-        }
-
+        button:hover { background-color: #2563EB; }
         .status-badge {
             font-size: 0.85rem;
             color: #10B981;
             font-weight: 500;
         }
-
         .kpi-container {
             display: flex;
             gap: 15px;
             margin-bottom: 20px;
             justify-content: space-between;
         }
-
         .kpi-card {
             background-color: #1E293B;
             flex: 1;
@@ -118,34 +100,29 @@
             text-align: center;
             border-top: 4px solid #3B82F6;
         }
-
         .kpi-title {
             font-size: 0.8rem;
             color: #94A3B8;
             font-weight: bold;
             margin-bottom: 5px;
         }
-
         .kpi-value {
             font-size: 1.5rem;
             font-weight: bold;
         }
-
         .charts-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
             gap: 20px;
         }
-
         .chart-card {
             background-color: #1E293B;
             padding: 15px;
             border-radius: 8px;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             position: relative;
-            height: 320px;
+            height: 350px;
         }
-
         .log-panel {
             margin-top: 20px;
             font-size: 0.8rem;
@@ -161,21 +138,20 @@
 <body>
 
     <div class="header">
-        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES (ULTRA-FAST)</span>
+        <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES</span>
         <div class="live-indicator">
             <span class="pulse-dot"></span>
-            <span>TEMPO REAL</span>
+            <span>AO VIVO</span>
         </div>
     </div>
 
-    <!-- Controles para Inserir Links e Frequência de Varredura -->
     <div class="controls">
         <div class="input-group">
-            <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vRxYvgf_Qo-6dJWXBzVg-_QXo9WeDNCFct6COPkWpEX1pZJVqJzrXLOWj1roJCPeJlsgfmJDCSd7tgX/pub?gid=1860750382&single=true&output=csv" placeholder="Link do CSV ou URL da Planilha...">
-            <select id="updateInterval" onchange="alterarIntervalo()">
-                <option value="500">Atualizar: 0.5s (Ultra)</option>
-                <option value="1000" selected>Atualizar: 1.0s (Rápido)</option>
-                <option value="2000">Atualizar: 2.0s (Normal)</option>
+            <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vRxYvgf_Qo-6dJWXBzVg-_QXo9WeDNCFct6COPkWpEX1pZJVqJzrXLOWj1roJCPeJlsgfmJDCSd7tgX/pub?gid=1860750382&single=true&output=csv" placeholder="Link do CSV da Aba de Dados...">
+            <select id="intervaloSelect" onchange="alterarIntervalo()">
+                <option value="500">Atualizar a cada: 0.5s (Ultra Rápido)</option>
+                <option value="1000" selected>Atualizar a cada: 1.0s (Rápido)</option>
+                <option value="2000">Atualizar a cada: 2.0s (Normal)</option>
             </select>
         </div>
         <div class="input-group">
@@ -185,7 +161,6 @@
         </div>
     </div>
 
-    <!-- Indicadores KPI -->
     <div class="kpi-container">
         <div class="kpi-card" style="border-color: #3B82F6;">
             <div class="kpi-title">ÚLTIMO STATUS</div>
@@ -201,7 +176,6 @@
         </div>
     </div>
 
-    <!-- Seção dos Gráficos -->
     <div class="charts-grid">
         <div class="chart-card">
             <canvas id="chartAceleracao"></canvas>
@@ -213,44 +187,25 @@
 
     <div class="log-panel">
         <span id="logStatus">Status: Inicializando sistema...</span>
-        <span id="latencyStatus">Latência: -- ms</span>
+        <span id="logLatency">Latência: -- ms</span>
     </div>
 
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
-
         let totalLeiturasAcumuladas = 0;
-        let tamanhoUltimaLeituraDados = 0;
-        let intervalId = null;
-        let isFetching = false;
+        let timerLoop = null;
 
         function setLog(msg) {
             document.getElementById('logStatus').innerText = 'Status: ' + msg;
         }
 
         function parseNum(val) {
+            if (val === null || val === undefined) return 0;
             if (typeof val === 'number') return isNaN(val) ? 0 : val;
-            if (!val) return 0;
-            let n = parseFloat(String(val).replace(',', '.'));
+            let str = String(val).trim().replace(',', '.');
+            let n = parseFloat(str);
             return isNaN(n) ? 0 : n;
-        }
-
-        function extrairSpreadsheetDetails(url) {
-            let cleanUrl = url.trim();
-            // Tenta extrair ID do documento e GID da aba para busca via Google API Direct
-            const matchDocId = cleanUrl.match(/\/d\/e\/([^\/]+)/) || cleanUrl.match(/\/d\/([^\/]+)/);
-            const matchGid = cleanUrl.match(/gid=([0-9]+)/);
-
-            if (matchDocId && matchGid) {
-                return {
-                    docId: matchDocId[1],
-                    gid: matchGid[1],
-                    // constrói endpoint JSON ultra rápido do Google Visualization Query Protocol
-                    gvizUrl: `https://docs.google.com/spreadsheets/d/${matchDocId[1]}/gviz/tq?tqx=out:json&gid=${matchGid[1]}`
-                };
-            }
-            return null;
         }
 
         function formatarUrlCSV(url) {
@@ -273,22 +228,21 @@
                     data: {
                         labels: [],
                         datasets: [
-                            { label: 'Eixo X', data: [], borderColor: '#EF4444', borderWidth: 1.5, fill: false, pointRadius: 0 },
-                            { label: 'Eixo Y', data: [], borderColor: '#10B981', borderWidth: 1.5, fill: false, pointRadius: 0 },
-                            { label: 'Eixo Z', data: [], borderColor: '#3B82F6', borderWidth: 1.5, fill: false, pointRadius: 0 }
+                            { label: 'Eixo X', data: [], borderColor: '#EF4444', backgroundColor: '#EF4444', borderWidth: 2, fill: false, pointRadius: 1, tension: 0.1 },
+                            { label: 'Eixo Y', data: [], borderColor: '#10B981', backgroundColor: '#10B981', borderWidth: 2, fill: false, pointRadius: 1, tension: 0.1 },
+                            { label: 'Eixo Z', data: [], borderColor: '#3B82F6', backgroundColor: '#3B82F6', borderWidth: 2, fill: false, pointRadius: 1, tension: 0.1 }
                         ]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
                         animation: false,
-                        parsing: false, // Performance boost para dados em tempo real
                         plugins: {
                             title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
                             legend: { labels: { color: '#CBD5E1' } }
                         },
                         scales: {
-                            x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
+                            x: { ticks: { color: '#CBD5E1', maxRotation: 0 }, grid: { color: '#334155' } },
                             y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
                         }
                     }
@@ -319,99 +273,46 @@
                         }
                     }
                 });
-                setLog('Gráficos prontos. Aguardando sincronização ultra-rápida...');
+                setLog('Gráficos inicializados com sucesso.');
             } catch (e) {
-                setLog('Erro ao criar estrutura gráfica: ' + e.message);
+                setLog('Erro na criação dos gráficos: ' + e.message);
             }
         }
 
-        function carregarDadosManualmente() {
-            tamanhoUltimaLeituraDados = 0;
-            sincronizarTudo();
+        function sincronizarTudo() {
+            let tInicio = performance.now();
+            carregarDadosTemporais(() => {
+                let tFim = performance.now();
+                document.getElementById('logLatency').innerText = `Latência: ${Math.round(tFim - tInicio)} ms`;
+            });
+            carregarDadosFFT();
         }
 
-        async function sincronizarTudo() {
-            if (isFetching) return;
-            isFetching = true;
-            const startTime = performance.now();
+        function carregarDadosTemporais(callback) {
+            let url = formatarUrlCSV(document.getElementById('csvUrl').value);
+            if (!url) return;
 
-            try {
-                await Promise.all([carregarDadosTemporais(), carregarDadosFFT()]);
-                const endTime = performance.now();
-                document.getElementById('latencyStatus').innerText = `Latência: ${Math.round(endTime - startTime)} ms`;
-            } catch (e) {
-                console.error(e);
-            } finally {
-                isFetching = false;
-            }
-        }
+            const urlSemCache = url + '&_nocache=' + new Date().getTime();
 
-        async function carregarDadosTemporais() {
-            let inputUrl = document.getElementById('csvUrl').value;
-            if (!inputUrl) return;
-
-            let details = extrairSpreadsheetDetails(inputUrl);
-
-            // Método High-Speed (Fetch Direct JSON via GViz Protocol API)
-            if (details && details.gvizUrl) {
-                try {
-                    const response = await fetch(`${details.gvizUrl}&_nocache=${Date.now()}`, { cache: 'no-store' });
-                    const text = await response.text();
-                    
-                    // O GViz retorna no formato google.visualization.Query.setResponse({...});
-                    const jsonString = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);/);
-                    if (jsonString && jsonString[1]) {
-                        const dataObj = JSON.parse(jsonString[1]);
-                        if (dataObj.status === 'ok' && dataObj.table) {
-                            processarGvizDataTemporais(dataObj.table);
-                            document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
-                            return;
-                        }
+            Papa.parse(urlSemCache, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processarDadosTemporais(results.data);
+                        document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
                     }
-                } catch (err) {
-                    console.warn("Fallback para CSV padrão ativo.");
+                    if (callback) callback();
+                },
+                error: function() {
+                    setLog('Erro de conexão/download do CSV.');
+                    if (callback) callback();
                 }
-            }
-
-            // Fallback via PapaParse (com otimização de Cache Bypass)
-            let url = formatarUrlCSV(inputUrl);
-            const urlSemCache = url + '&_t=' + Date.now();
-
-            return new Promise((resolve) => {
-                Papa.parse(urlSemCache, {
-                    download: true,
-                    header: true,
-                    skipEmptyLines: true,
-                    complete: function(results) {
-                        if (results.data && results.data.length > 0) {
-                            processarDadosTemporais(results.data);
-                            document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
-                        }
-                        resolve();
-                    },
-                    error: function() {
-                        setLog('Erro de conexão com o CSV da aba de Dados.');
-                        resolve();
-                    }
-                });
             });
         }
 
-        function processarGvizDataTemporais(table) {
-            if (!table.rows || table.rows.length === 0) return;
-
-            const cols = table.cols.map(c => (c.label || '').toLowerCase());
-            
-            let idxTempo = cols.findIndex(c => c.includes('tempo') || c.includes('time'));
-            let idxX = cols.findIndex(c => c.includes('x'));
-            let idxY = cols.findIndex(c => c.includes('y'));
-            let idxZ = cols.findIndex(c => c.includes('z'));
-            let idxStatus = cols.findIndex(c => c.includes('status'));
-
-            if (idxX === -1) idxX = 1;
-            if (idxY === -1) idxY = 2;
-            if (idxZ === -1) idxZ = 3;
-
+        function processarDadosTemporais(rawGroup) {
             let tempos = [];
             let acelX = [];
             let acelY = [];
@@ -421,19 +322,24 @@
 
             let linhasValidasCount = 0;
 
-            table.rows.forEach((r, idx) => {
-                if (!r.c) return;
-                
-                let valX = r.c[idxX] ? r.c[idxX].v : null;
-                let valY = r.c[idxY] ? r.c[idxY].v : null;
-                let valZ = r.c[idxZ] ? r.c[idxZ].v : null;
+            rawGroup.forEach((row, idx) => {
+                let keys = Object.keys(row);
+                let getVal = (nomes) => {
+                    let k = keys.find(key => nomes.some(n => key.toLowerCase().trim() === n.toLowerCase().trim() || key.toLowerCase().includes(n.toLowerCase())));
+                    return k ? row[k] : null;
+                };
 
-                if (valX !== null || valY !== null || valZ !== null) {
-                    linhasValidasCount++;
-                    let t = parseNum(idxTempo !== -1 && r.c[idxTempo] ? r.c[idxTempo].v : idx);
-                    let x = parseNum(valX);
-                    let y = parseNum(valY);
-                    let z = parseNum(valZ);
+                let rawT = getVal(['tempo', 'time', 't']);
+                let rawX = getVal(['aceleração x', 'aceleraçao x', 'eixo x', 'x']);
+                let rawY = getVal(['aceleração y', 'aceleraçao y', 'eixo y', 'y']);
+                let rawZ = getVal(['aceleração z', 'aceleraçao z', 'eixo z', 'z']);
+
+                // Se houver algum valor válido na linha
+                if (rawX !== null || rawY !== null || rawZ !== null || rawT !== null) {
+                    let t = rawT !== null ? String(rawT).trim() : String(idx);
+                    let x = parseNum(rawX);
+                    let y = parseNum(rawY);
+                    let z = parseNum(rawZ);
 
                     tempos.push(t);
                     acelX.push(x);
@@ -441,100 +347,47 @@
                     acelZ.push(z);
 
                     if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                    if (idxStatus !== -1 && r.c[idxStatus] && r.c[idxStatus].v) {
-                        ultimoStatus = r.c[idxStatus].v;
+                    let st = getVal(['status']);
+                    if (st && String(st).trim() !== '') ultimoStatus = String(st).trim();
+
+                    linhasValidasCount++;
+                }
+            });
+
+            totalLeiturasAcumuladas = linhasValidasCount;
+
+            document.getElementById('kpiStatus').innerText = ultimoStatus;
+            document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
+            document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
+
+            if (chartAcelInstance) {
+                chartAcelInstance.data.labels = tempos;
+                chartAcelInstance.data.datasets[0].data = acelX;
+                chartAcelInstance.data.datasets[1].data = acelY;
+                chartAcelInstance.data.datasets[2].data = acelZ;
+                
+                // Força atualização imediata
+                chartAcelInstance.update();
+            }
+
+            setLog(`Sincronizado! ${linhasValidasCount} leituras plotadas.`);
+        }
+
+        function carregarDadosFFT() {
+            let urlFft = formatarUrlCSV(document.getElementById('csvFftUrl').value);
+            if (!urlFft) return;
+
+            const urlSemCache = urlFft + '&_nocache=' + new Date().getTime();
+
+            Papa.parse(urlSemCache, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processarDadosFFT(results.data);
                     }
                 }
-            });
-
-            atualizarPainelEGrafico(linhasValidasCount, tempos, acelX, acelY, acelZ, maxZ, ultimoStatus);
-        }
-
-        function processarDadosTemporais(rawGroup) {
-            const linhasValidas = rawGroup.filter(row => {
-                let keys = Object.keys(row);
-                return keys.some(k => {
-                    let val = String(row[k]).trim();
-                    return val !== '' && !isNaN(parseFloat(val.replace(',', '.')));
-                });
-            });
-
-            let tempos = [];
-            let acelX = [];
-            let acelY = [];
-            let acelZ = [];
-            let maxZ = 0;
-            let ultimoStatus = "Normal";
-
-            linhasValidas.forEach((row, idx) => {
-                let keys = Object.keys(row);
-                let getVal = (nomes) => {
-                    let k = keys.find(key => nomes.some(n => key.toLowerCase().includes(n.toLowerCase())));
-                    return k ? row[k] : null;
-                };
-
-                let t = parseNum(getVal(['tempo', 'time']) || idx);
-                let x = parseNum(getVal(['aceleração x', 'aceleraçao x', 'eixo x', 'x']));
-                let y = parseNum(getVal(['aceleração y', 'aceleraçao y', 'eixo y', 'y']));
-                let z = parseNum(getVal(['aceleração z', 'aceleraçao z', 'eixo z', 'z']));
-
-                tempos.push(t);
-                acelX.push(x);
-                acelY.push(y);
-                acelZ.push(z);
-
-                if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                let st = getVal(['status']);
-                if (st) ultimoStatus = st;
-            });
-
-            atualizarPainelEGrafico(linhasValidas.length, tempos, acelX, acelY, acelZ, maxZ, ultimoStatus);
-        }
-
-        function atualizarPainelEGrafico(quantidadeAtual, tempos, acelX, acelY, acelZ, maxZ, ultimoStatus) {
-            if (quantidadeAtual >= tamanhoUltimaLeituraDados) {
-                if (quantidadeAtual > tamanhoUltimaLeituraDados) {
-                    const novosDadosCount = quantidadeAtual - tamanhoUltimaLeituraDados;
-                    totalLeiturasAcumuladas += novosDadosCount;
-                    tamanhoUltimaLeituraDados = quantidadeAtual;
-                }
-
-                document.getElementById('kpiStatus').innerText = ultimoStatus;
-                document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
-                document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
-
-                if (chartAcelInstance) {
-                    chartAcelInstance.data.labels = tempos;
-                    chartAcelInstance.data.datasets[0].data = acelX;
-                    chartAcelInstance.data.datasets[1].data = acelY;
-                    chartAcelInstance.data.datasets[2].data = acelZ;
-                    chartAcelInstance.update('none'); // Renderização direta sem animação
-                }
-
-                setLog(`Sincronizado! ${quantidadeAtual} leituras processadas.`);
-            }
-        }
-
-        async function carregarDadosFFT() {
-            let inputUrlFft = document.getElementById('csvFftUrl').value;
-            if (!inputUrlFft) return;
-
-            let urlFft = formatarUrlCSV(inputUrlFft);
-            const urlSemCache = urlFft + '&_t=' + Date.now();
-
-            return new Promise((resolve) => {
-                Papa.parse(urlSemCache, {
-                    download: true,
-                    header: true,
-                    skipEmptyLines: true,
-                    complete: function(results) {
-                        if (results.data && results.data.length > 0) {
-                            processarDadosFFT(results.data);
-                        }
-                        resolve();
-                    },
-                    error: resolve
-                });
             });
         }
 
@@ -556,21 +409,23 @@
                 magnitudes.push(mag.toFixed(4));
             });
 
-            if (frequencias.length > 0 && chartFFTInstance) {
+            if (chartFFTInstance && frequencias.length > 0) {
                 chartFFTInstance.data.labels = frequencias;
                 chartFFTInstance.data.datasets[0].data = magnitudes;
-                chartFFTInstance.update('none');
+                chartFFTInstance.update();
             }
         }
 
-        function alterarIntervalo() {
-            const val = parseInt(document.getElementById('updateInterval').value) || 1000;
-            if (intervalId) clearInterval(intervalId);
-            intervalId = setInterval(sincronizarTudo, val);
-            setLog(`Frequência ajustada para ${val}ms.`);
+        function carregarDadosManualmente() {
+            sincronizarTudo();
         }
 
-        // Execução principal
+        function alterarIntervalo() {
+            let ms = parseInt(document.getElementById('intervaloSelect').value);
+            if (timerLoop) clearInterval(timerLoop);
+            timerLoop = setInterval(sincronizarTudo, ms);
+        }
+
         window.onload = function() {
             inicializarGraficos();
             sincronizarTudo();
