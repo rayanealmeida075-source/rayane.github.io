@@ -1,11 +1,8 @@
 function processarDados(data) {
     const quantidadeAtual = data.length;
 
-    // Identifica se chegaram novos dados ou se a quantidade mudou
     if (quantidadeAtual !== tamanhoUltimaLeitura) {
         tamanhoUltimaLeitura = quantidadeAtual;
-        
-        // Define o total exatamente como a quantidade de linhas da planilha
         totalLeiturasAcumuladas = quantidadeAtual;
 
         let tempos = [];
@@ -32,12 +29,10 @@ function processarDados(data) {
             }
         });
 
-        // Atualização instantânea dos KPIs
         document.getElementById('kpiStatus').innerText = ultimoStatus;
         document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
         document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
 
-        // Atualização do Gráfico
         chartAcelInstance.data.labels = tempos;
         chartAcelInstance.data.datasets[0].data = acelX;
         chartAcelInstance.data.datasets[1].data = acelY;
