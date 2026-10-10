@@ -196,6 +196,9 @@
         let chartAcelInstance = null;
         let chartFFTInstance = null;
         let carregandoEmAndamento = false;
+        
+        // Trava para garantir que o número de leituras NUNCA retroceda por causa do cache do Google Sheets
+        let maiorQuantidadeLeiturasRegistrada = 0;
 
         function parseNum(val) {
             if (typeof val === 'number') return val;
@@ -204,7 +207,6 @@
         }
 
         function inicializarGraficos() {
-            // Gráfico 1: Aceleração X, Y, Z (Temporal)
             const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
             chartAcelInstance = new Chart(ctxAcel, {
                 type: 'line',
@@ -230,7 +232,6 @@
                 }
             });
 
-            // Gráfico 2: Espectro FFT (Eixo Z como referência principal ou última janela)
             const ctxFFT = document.getElementById('chartFFT').getContext('2d');
             chartFFTInstance = new Chart(ctxFFT, {
                 type: 'bar',
@@ -258,6 +259,7 @@
         }
 
         function carregarDadosManualmente() {
+            maiorQuantidadeLeiturasRegistrada = 0; // Reseta o filtro se o usuário quiser forçar do zero
             carregarDados();
         }
 
@@ -277,15 +279,21 @@
 
             const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
 
-            // 1. Carrega Aba Principal ("Dados")
             Papa.parse(urlSemCache, {
                 download: true,
                 header: true,
                 skipEmptyLines: true,
                 complete: function(results) {
                     if (results.data && results.data.length > 0) {
-                        processarDadosPrincipal(results.data);
-                        document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
+                        let quantidadeAtual = results.data.length;
+
+                        // BLOQUEIO DE REGRESSÃO: Só processa se a quantidade de linhas for MAIOR ou IGUAL à maior já vista.
+                        // Isso ignora respostas em cache antigo do Google Sheets que venham com menos linhas.
+                        if (quantidadeAtual >= maiorQuantidadeLeiturasRegistrada) {
+                            maiorQuantidadeLeiturasRegistrada = quantidadeAtual;
+                            processarDadosPrincipal(results.data);
+                            document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
+                        }
                     }
                     carregarDadosFFT(url);
                 },
@@ -300,8 +308,6 @@
             let urlFft = document.getElementById('csvFftUrl').value.trim();
 
             if (!urlFft) {
-                // Tenta inferir a aba FFT trocando o gid atual pelo gid da aba FFT (ou gerando dinamicamente)
-                // Substitua o número do gid abaixo caso saiba o ID exato da aba FFT na sua planilha publicada
                 urlFft = urlBase.replace(/gid=\d+/, 'gid=1'); 
             }
 
@@ -365,16 +371,13 @@
         }
 
         function processarDadosFFT(data) {
-            // Pega apenas as linhas correspondentes à última janela/timestamp registrada na aba FFT para evitar acumulação suja
             let ultimaLinha = data[data.length - 1];
             if (!ultimaLinha) return;
             
             let ultimoTempoFFT = ultimaLinha['Tempo (s)'];
-            
             let frequencias = [];
             let magnitudes = [];
 
-            // Filtra e coleta apenas os registros da última janela temporal da FFT
             data.forEach(row => {
                 if (row['Tempo (s)'] === ultimoTempoFFT) {
                     let freqZ = parseNum(row['Freq Z (Hz)']);
