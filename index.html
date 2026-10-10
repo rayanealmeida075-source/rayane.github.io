@@ -154,13 +154,13 @@
         </div>
     </div>
 
-    <!-- Controles de Links CSV -->
+    <!-- Campo para inserir os Links dos CSVs das Planilhas -->
     <div class="controls">
         <div class="input-group">
             <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Link do CSV da Aba de Dados...">
         </div>
         <div class="input-group">
-            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (deixe em branco para auto-detectar)...">
+            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional, gerado auto se vazio)...">
             <button onclick="carregarDadosManualmente()">Forçar Atualização</button>
             <span id="lastUpdate" class="status-badge">Conectando...</span>
         </div>
@@ -177,12 +177,12 @@
             <div class="kpi-value" id="kpiMaxZ">--</div>
         </div>
         <div class="kpi-card" style="border-color: #F59E0B;">
-            <div class="kpi-title">TOTAL DE LEITURAS</div>
+            <div class="kpi-title">TOTAL ACUMULADO DE LEITURAS</div>
             <div class="kpi-value" id="kpiLeituras">0</div>
         </div>
     </div>
 
-    <!-- Gráficos -->
+    <!-- Seção dos Gráficos -->
     <div class="charts-grid">
         <div class="chart-card">
             <canvas id="chartAceleracao"></canvas>
@@ -195,17 +195,20 @@
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
-        let carregandoEmAndamento = false;
-        
-        // Trava para garantir que o número de leituras NUNCA retroceda por causa do cache do Google Sheets
-        let maiorQuantidadeLeiturasRegistrada = 0;
 
+        // Controle do somatório acumulado e leituras já processadas
+        let totalLeiturasAcumuladas = 0;
+        let tamanhoUltimaLeitura = 0;
+        let tamanhoUltimaLeituraFFT = 0;
+
+        // Converte strings numéricas com ponto ou vírgula
         function parseNum(val) {
             if (typeof val === 'number') return val;
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.')) || 0;
         }
 
+        // Inicialização dos gráficos
         function inicializarGraficos() {
             const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
             chartAcelInstance = new Chart(ctxAcel, {
@@ -222,7 +225,7 @@
                     responsive: true,
                     animation: false,
                     plugins: {
-                        title: { display: true, text: '1. Tendência Temporal de Aceleração (X, Y, Z)', color: '#F8FAFC' },
+                        title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
                         legend: { labels: { color: '#CBD5E1' } }
                     },
                     scales: {
@@ -238,7 +241,7 @@
                 data: {
                     labels: [],
                     datasets: [{
-                        label: 'Magnitude Z (g)',
+                        label: 'Magnitude (g)',
                         data: [],
                         backgroundColor: '#8B5CF6'
                     }]
@@ -247,7 +250,7 @@
                     responsive: true,
                     animation: false,
                     plugins: {
-                        title: { display: true, text: '2. Espectro de Frequência - Eixo Z (Aba FFT)', color: '#F8FAFC' },
+                        title: { display: true, text: '2. Espectro de Frequência (Aba FFT)', color: '#F8FAFC' },
                         legend: { display: false }
                     },
                     scales: {
@@ -259,24 +262,19 @@
         }
 
         function carregarDadosManualmente() {
-            maiorQuantidadeLeiturasRegistrada = 0; // Reseta o filtro se o usuário quiser forçar do zero
+            tamanhoUltimaLeitura = 0; // Força reprocessamento total ao clicar no botão
             carregarDados();
         }
 
         function carregarDados() {
-            if (carregandoEmAndamento) return;
-            carregandoEmAndamento = true;
-
             let url = document.getElementById('csvUrl').value.trim();
-            if (!url) {
-                carregandoEmAndamento = false;
-                return;
-            }
+            if (!url) return;
 
             if (url.includes('pubhtml')) {
                 url = url.replace('pubhtml', 'pub') + '&output=csv';
             }
 
+            // Impede o cache do navegador adicionando timestamp
             const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
 
             Papa.parse(urlSemCache, {
@@ -285,30 +283,23 @@
                 skipEmptyLines: true,
                 complete: function(results) {
                     if (results.data && results.data.length > 0) {
-                        let quantidadeAtual = results.data.length;
-
-                        // BLOQUEIO DE REGRESSÃO: Só processa se a quantidade de linhas for MAIOR ou IGUAL à maior já vista.
-                        // Isso ignora respostas em cache antigo do Google Sheets que venham com menos linhas.
-                        if (quantidadeAtual >= maiorQuantidadeLeiturasRegistrada) {
-                            maiorQuantidadeLeiturasRegistrada = quantidadeAtual;
-                            processarDadosPrincipal(results.data);
-                            document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
-                        }
+                        processarDados(results.data);
+                        document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
                     }
-                    carregarDadosFFT(url);
                 },
                 error: function(err) {
-                    console.error('Erro na aba de Dados:', err);
-                    carregandoEmAndamento = false;
+                    console.error('Erro na sincronização de dados:', err);
                 }
             });
+
+            carregarDadosFFT(url);
         }
 
         function carregarDadosFFT(urlBase) {
             let urlFft = document.getElementById('csvFftUrl').value.trim();
 
             if (!urlFft) {
-                urlFft = urlBase.replace(/gid=\d+/, 'gid=1'); 
+                urlFft = urlBase.replace(/gid=\d+/, 'gid=0'); 
             }
 
             if (urlFft.includes('pubhtml')) {
@@ -325,83 +316,89 @@
                     if (results.data && results.data.length > 0) {
                         processarDadosFFT(results.data);
                     }
-                    carregandoEmAndamento = false;
                 },
                 error: function(err) {
-                    console.error('Aviso: Aba FFT ainda não publicada ou ignorada.', err);
-                    carregandoEmAndamento = false;
+                    console.error('Erro nos dados da aba FFT:', err);
                 }
             });
         }
 
-        function processarDadosPrincipal(data) {
-            let tempos = [];
-            let acelX = [];
-            let acelY = [];
-            let acelZ = [];
-            let maxZ = 0;
-            let ultimoStatus = "Normal";
+        function processarDados(data) {
+            const quantidadeAtual = data.length;
 
-            data.forEach(row => {
-                let t = parseNum(row['Tempo (s)']);
-                let x = parseNum(row['Aceleração X (g)']);
-                let y = parseNum(row['Aceleração Y (g)']);
-                let z = parseNum(row['Aceleração Z (g)']);
+            // Identifica se chegaram novos dados na planilha
+            if (quantidadeAtual > tamanhoUltimaLeitura) {
+                const novosDadosCount = quantidadeAtual - tamanhoUltimaLeitura;
+                
+                // Soma a quantidade de novas leituras ao total
+                totalLeiturasAcumuladas += novosDadosCount;
+                tamanhoUltimaLeitura = quantidadeAtual;
 
-                tempos.push(t);
-                acelX.push(x);
-                acelY.push(y);
-                acelZ.push(z);
+                let tempos = [];
+                let acelX = [];
+                let acelY = [];
+                let acelZ = [];
+                let maxZ = 0;
+                let ultimoStatus = "Normal";
 
-                if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
-                if (row['Status Estrutural']) {
-                    ultimoStatus = row['Status Estrutural'];
-                }
-            });
+                data.forEach(row => {
+                    let t = parseNum(row['Tempo (s)'] || row['Tempo'] || 0);
+                    let x = parseNum(row['Aceleração X (g)'] || row['Aceleração X'] || row['Aceleraçao X (g)'] || 0);
+                    let y = parseNum(row['Aceleração Y (g)'] || row['Aceleração Y'] || row['Aceleraçao Y (g)'] || 0);
+                    let z = parseNum(row['Aceleração Z (g)'] || row['Aceleração Z'] || row['Aceleraçao Z (g)'] || 0);
 
-            document.getElementById('kpiStatus').innerText = ultimoStatus;
-            document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
-            document.getElementById('kpiLeituras').innerText = data.length.toLocaleString('pt-BR');
+                    tempos.push(t);
+                    acelX.push(x);
+                    acelY.push(y);
+                    acelZ.push(z);
 
-            chartAcelInstance.data.labels = tempos;
-            chartAcelInstance.data.datasets[0].data = acelX;
-            chartAcelInstance.data.datasets[1].data = acelY;
-            chartAcelInstance.data.datasets[2].data = acelZ;
-            chartAcelInstance.update('none');
-        }
-
-        function processarDadosFFT(data) {
-            let ultimaLinha = data[data.length - 1];
-            if (!ultimaLinha) return;
-            
-            let ultimoTempoFFT = ultimaLinha['Tempo (s)'];
-            let frequencias = [];
-            let magnitudes = [];
-
-            data.forEach(row => {
-                if (row['Tempo (s)'] === ultimoTempoFFT) {
-                    let freqZ = parseNum(row['Freq Z (Hz)']);
-                    let magZ = parseNum(row['Mag Z (g)']);
-                    
-                    if (freqZ > 0 || magZ > 0) {
-                        frequencias.push(freqZ.toFixed(2));
-                        magnitudes.push(magZ.toFixed(4));
+                    if (Math.abs(z) > maxZ) maxZ = Math.abs(z);
+                    if (row['Status'] || row['Status Estrutural']) {
+                        ultimoStatus = row['Status'] || row['Status Estrutural'];
                     }
-                }
-            });
+                });
 
-            if (frequencias.length > 0) {
-                chartFFTInstance.data.labels = frequencias;
-                chartFFTInstance.data.datasets[0].data = magnitudes;
-                chartFFTInstance.update('none');
+                // Atualização instantânea dos KPIs
+                document.getElementById('kpiStatus').innerText = ultimoStatus;
+                document.getElementById('kpiMaxZ').innerText = maxZ.toFixed(4);
+                document.getElementById('kpiLeituras').innerText = totalLeiturasAcumuladas.toLocaleString('pt-BR');
+
+                // Atualização do Gráfico sem recarregar o canvas inteiro
+                chartAcelInstance.data.labels = tempos;
+                chartAcelInstance.data.datasets[0].data = acelX;
+                chartAcelInstance.data.datasets[1].data = acelY;
+                chartAcelInstance.data.datasets[2].data = acelZ;
+                chartAcelInstance.update('none');
             }
         }
 
-        // Inicialização
+        function processarDadosFFT(data) {
+            if (data.length !== tamanhoUltimaLeituraFFT) {
+                tamanhoUltimaLeituraFFT = data.length;
+                let frequencias = [];
+                let magnitudes = [];
+
+                data.forEach(row => {
+                    let freq = parseNum(row['Frequência (Hz)'] || row['Frequencia (Hz)'] || row['Frequência'] || row['Frequencia'] || row['Freq'] || 0);
+                    let mag = parseNum(row['Magnitude'] || row['Magnitude (g)'] || row['Amplitude'] || row['Aceleração (g)'] || 0);
+
+                    frequencias.push(freq.toFixed(2));
+                    magnitudes.push(mag.toFixed(4));
+                });
+
+                if (frequencias.length > 0) {
+                    chartFFTInstance.data.labels = frequencias;
+                    chartFFTInstance.data.datasets[0].data = magnitudes;
+                    chartFFTInstance.update('none');
+                }
+            }
+        }
+
+        // Execução inicial
         inicializarGraficos();
         carregarDados();
 
-        // Intervalo de atualização automática (1.5 segundos)
+        // Checagem automática constante a cada 1.5 segundos (1500 ms)
         setInterval(carregarDados, 1500);
     </script>
 </body>
