@@ -197,8 +197,9 @@
         let chartFFTInstance = null;
         let carregandoEmAndamento = false;
         
-        // Memória local estrita para acumular apenas para frente
+        // Memória local estrita para acumular os dados em fila progressiva sem regressões
         let historicoLocal = {
+            indices: [],
             tempos: [],
             acelX: [],
             acelY: [],
@@ -266,8 +267,8 @@
         }
 
         function carregarDadosManualmente() {
-            // Reseta a memória local se quiser reiniciar do zero
-            historicoLocal = { tempos: [], acelX: [], acelY: [], acelZ: [], maxZGlobal: 0, ultimoStatusGlobal: "Normal" };
+            // Reseta a memória local para reiniciar do zero
+            historicoLocal = { indices: [], tempos: [], acelX: [], acelY: [], acelZ: [], maxZGlobal: 0, ultimoStatusGlobal: "Normal" };
             carregarDados();
         }
 
@@ -309,6 +310,7 @@
             let urlFft = document.getElementById('csvFftUrl').value.trim();
 
             if (!urlFft) {
+                // Altera o GID para a aba FFT (gid=1 ou ajuste conforme sua planilha)
                 urlFft = urlBase.replace(/gid=\d+/, 'gid=1'); 
             }
 
@@ -336,19 +338,21 @@
         }
 
         function processarDadosAcumulativos(data) {
-            // Se a quantidade de linhas recebida for MAIOR ou IGUAL ao nosso histórico local, 
-            // extraímos apenas os NOVOS itens que entraram no final da fila.
-            if (data.length >= historicoLocal.tempos.length) {
-                // Descobre a partir de qual índice começam os novos dados
-                let inicioIndex = historicoLocal.tempos.length;
+            // Só aceita processar se a quantidade de linhas da planilha for MAIOR ou IGUAL à nossa memória 
+            // (evita que o cache antigo do Google Sheets faça o painel recuar)
+            if (data.length >= historicoLocal.indices.length) {
+                let inicioIndex = historicoLocal.indices.length;
 
                 for (let i = inicioIndex; i < data.length; i++) {
                     let row = data[i];
-                    let t = parseNum(row['Tempo (s)']);
-                    let x = parseNum(row['Aceleração X (g)']);
-                    let y = parseNum(row['Aceleração Y (g)']);
-                    let z = parseNum(row['Aceleração Z (g)']);
+                    let numeroSequencia = i + 1; // Fila estrita 1, 2, 3, 4...
+                    
+                    let t = parseNum(row['Tempo (s)'] || row['Tempo'] || 0);
+                    let x = parseNum(row['Aceleração X (g)'] || row['Aceleração X'] || row['Aceleraçao X (g)'] || 0);
+                    let y = parseNum(row['Aceleração Y (g)'] || row['Aceleração Y'] || row['Aceleraçao Y (g)'] || 0);
+                    let z = parseNum(row['Aceleração Z (g)'] || row['Aceleração Z'] || row['Aceleraçao Z (g)'] || 0);
 
+                    historicoLocal.indices.push(numeroSequencia);
                     historicoLocal.tempos.push(t);
                     historicoLocal.acelX.push(x);
                     historicoLocal.acelY.push(y);
@@ -357,20 +361,19 @@
                     if (Math.abs(z) > historicoLocal.maxZGlobal) {
                         historicoLocal.maxZGlobal = Math.abs(z);
                     }
-                    if (row['Status Estrutural']) {
-                        historicoLocal.ultimoStatusGlobal = row['Status Estrutural'];
+                    if (row['Status'] || row['Status Estrutural']) {
+                        historicoLocal.ultimoStatusGlobal = row['Status'] || row['Status Estrutural'];
                     }
                 }
             }
-            // Se vier menos linhas (por causa do cache do Google), o código simplesmente IGNORA 
-            // e mantém o painel intacto preenchido com a memória acumulada.
 
-            // Atualiza os componentes visuais com a memória segura
+            // Atualiza os KPIs visuais com os dados consolidados
             document.getElementById('kpiStatus').innerText = historicoLocal.ultimoStatusGlobal;
             document.getElementById('kpiMaxZ').innerText = historicoLocal.maxZGlobal.toFixed(4);
-            document.getElementById('kpiLeituras').innerText = historicoLocal.tempos.length.toLocaleString('pt-BR');
+            document.getElementById('kpiLeituras').innerText = historicoLocal.indices.length.toLocaleString('pt-BR');
 
-            chartAcelInstance.data.labels = historicoLocal.tempos;
+            // Renderiza o gráfico usando o índice sequencial perfeito (1, 2, 3, 4...) no eixo X
+            chartAcelInstance.data.labels = historicoLocal.indices;
             chartAcelInstance.data.datasets[0].data = historicoLocal.acelX;
             chartAcelInstance.data.datasets[1].data = historicoLocal.acelY;
             chartAcelInstance.data.datasets[2].data = historicoLocal.acelZ;
@@ -381,18 +384,18 @@
             let ultimaLinha = data[data.length - 1];
             if (!ultimaLinha) return;
             
-            let ultimoTempoFFT = ultimaLinha['Tempo (s)'];
+            let ultimoTempoFFT = ultimaLinha['Tempo (s)'] || ultimaLinha['Tempo'];
             let frequencias = [];
             let magnitudes = [];
 
             data.forEach(row => {
-                if (row['Tempo (s)'] === ultimoTempoFFT) {
-                    let freqZ = parseNum(row['Freq Z (Hz)']);
-                    let magZ = parseNum(row['Mag Z (g)']);
-                    
-                    if (freqZ > 0 || magZ > 0) {
-                        frequencias.push(freqZ.toFixed(2));
-                        magnitudes.push(magZ.toFixed(4));
+                if (!ultimoTempoFFT || row['Tempo (s)'] === ultimoTempoFFT || row['Tempo'] === ultimoTempoFFT) {
+                    let freq = parseNum(row['Frequência (Hz)'] || row['Frequencia (Hz)'] || row['Freq Z (Hz)'] || row['Frequência'] || row['Frequencia'] || row['Freq'] || 0);
+                    let mag = parseNum(row['Magnitude'] || row['Magnitude (g)'] || row['Mag Z (g)'] || row['Amplitude'] || row['Aceleração (g)'] || 0);
+
+                    if (freq > 0 || mag > 0) {
+                        frequencias.push(freq.toFixed(2));
+                        magnitudes.push(mag.toFixed(4));
                     }
                 }
             });
@@ -404,11 +407,11 @@
             }
         }
 
-        // Inicialização
+        // Inicialização do painel
         inicializarGraficos();
         carregarDados();
 
-        // Intervalo de atualização automática (1.5 segundos)
+        // Consulta automática a cada 1.5 segundos
         setInterval(carregarDados, 1500);
     </script>
 </body>
