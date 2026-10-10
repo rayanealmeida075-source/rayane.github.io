@@ -150,18 +150,18 @@
         <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES</span>
         <div class="live-indicator">
             <span class="pulse-dot"></span>
-            <span>AO VIVO</span>
+            <span>AO VIVO (STREAMING 1S)</span>
         </div>
     </div>
 
-    <!-- Controles de Links CSV -->
+    <!-- Campo para inserir os Links dos CSVs das Planilhas -->
     <div class="controls">
         <div class="input-group">
             <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Link do CSV da Aba de Dados...">
         </div>
         <div class="input-group">
-            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (deixe em branco para auto-detectar)...">
-            <button onclick="carregarDadosManualmente()">Forçar Limpeza e Reinício</button>
+            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional, gerado auto se vazio)...">
+            <button onclick="carregarDadosManualmente()">Forçar Atualização</button>
             <span id="lastUpdate" class="status-badge">Conectando...</span>
         </div>
     </div>
@@ -177,12 +177,12 @@
             <div class="kpi-value" id="kpiMaxZ">--</div>
         </div>
         <div class="kpi-card" style="border-color: #F59E0B;">
-            <div class="kpi-title">TOTAL DE LEITURAS</div>
+            <div class="kpi-title">TOTAL ACUMULADO DE LEITURAS</div>
             <div class="kpi-value" id="kpiLeituras">0</div>
         </div>
     </div>
 
-    <!-- Gráficos -->
+    <!-- Seção dos Gráficos -->
     <div class="charts-grid">
         <div class="chart-card">
             <canvas id="chartAceleracao"></canvas>
@@ -195,25 +195,23 @@
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
-        let carregandoEmAndamento = false;
-        
-        // Memória local estrita para acumular os dados em fila progressiva sem regressões
-        let historicoLocal = {
-            indices: [],
-            tempos: [],
-            acelX: [],
-            acelY: [],
-            acelZ: [],
-            maxZGlobal: 0,
-            ultimoStatusGlobal: "Normal"
-        };
 
+        // Filas e dados em buffer para processamento contínuo item por item
+        let dadosPendentes = [];
+        let totalLeiturasAcumuladas = 0;
+        let maxZGlobal = 0;
+        let ultimoStatusGlobal = "Normal";
+
+        let tamanhoUltimaLeituraFFT = 0;
+
+        // Converte strings numéricas com ponto ou vírgula
         function parseNum(val) {
             if (typeof val === 'number') return val;
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.')) || 0;
         }
 
+        // Inicialização dos gráficos
         function inicializarGraficos() {
             const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
             chartAcelInstance = new Chart(ctxAcel, {
@@ -230,7 +228,7 @@
                     responsive: true,
                     animation: false,
                     plugins: {
-                        title: { display: true, text: '1. Tendência Temporal de Aceleração (X, Y, Z)', color: '#F8FAFC' },
+                        title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
                         legend: { labels: { color: '#CBD5E1' } }
                     },
                     scales: {
@@ -246,7 +244,7 @@
                 data: {
                     labels: [],
                     datasets: [{
-                        label: 'Magnitude Z (g)',
+                        label: 'Magnitude (g)',
                         data: [],
                         backgroundColor: '#8B5CF6'
                     }]
@@ -255,7 +253,7 @@
                     responsive: true,
                     animation: false,
                     plugins: {
-                        title: { display: true, text: '2. Espectro de Frequência - Eixo Z (Aba FFT)', color: '#F8FAFC' },
+                        title: { display: true, text: '2. Espectro de Frequência (Aba FFT)', color: '#F8FAFC' },
                         legend: { display: false }
                     },
                     scales: {
@@ -267,152 +265,12 @@
         }
 
         function carregarDadosManualmente() {
-            // Reseta a memória local para reiniciar do zero
-            historicoLocal = { indices: [], tempos: [], acelX: [], acelY: [], acelZ: [], maxZGlobal: 0, ultimoStatusGlobal: "Normal" };
-            carregarDados();
+            dadosPendentes = []; // Limpa fila atual para recarregar do zero
+            carregarDadosCSV();
         }
 
-        function carregarDados() {
-            if (carregandoEmAndamento) return;
-            carregandoEmAndamento = true;
-
+        function carregarDadosCSV() {
             let url = document.getElementById('csvUrl').value.trim();
-            if (!url) {
-                carregandoEmAndamento = false;
-                return;
-            }
+            if (!url) return;
 
             if (url.includes('pubhtml')) {
-                url = url.replace('pubhtml', 'pub') + '&output=csv';
-            }
-
-            const urlSemCache = url + (url.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
-
-            Papa.parse(urlSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDadosAcumulativos(results.data);
-                        document.getElementById('lastUpdate').innerText = 'Atualizado às ' + new Date().toLocaleTimeString();
-                    }
-                    carregarDadosFFT(url);
-                },
-                error: function(err) {
-                    console.error('Erro na aba de Dados:', err);
-                    carregandoEmAndamento = false;
-                }
-            });
-        }
-
-        function carregarDadosFFT(urlBase) {
-            let urlFft = document.getElementById('csvFftUrl').value.trim();
-
-            if (!urlFft) {
-                // Altera o GID para a aba FFT (gid=1 ou ajuste conforme sua planilha)
-                urlFft = urlBase.replace(/gid=\d+/, 'gid=1'); 
-            }
-
-            if (urlFft.includes('pubhtml')) {
-                urlFft = urlFft.replace('pubhtml', 'pub') + '&output=csv';
-            }
-
-            const urlFftSemCache = urlFft + (urlFft.includes('?') ? '&' : '?') + '_t=' + new Date().getTime();
-
-            Papa.parse(urlFftSemCache, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processarDadosFFT(results.data);
-                    }
-                    carregandoEmAndamento = false;
-                },
-                error: function(err) {
-                    console.error('Aviso: Aba FFT ainda não publicada ou ignorada.', err);
-                    carregandoEmAndamento = false;
-                }
-            });
-        }
-
-        function processarDadosAcumulativos(data) {
-            // Só aceita processar se a quantidade de linhas da planilha for MAIOR ou IGUAL à nossa memória 
-            // (evita que o cache antigo do Google Sheets faça o painel recuar)
-            if (data.length >= historicoLocal.indices.length) {
-                let inicioIndex = historicoLocal.indices.length;
-
-                for (let i = inicioIndex; i < data.length; i++) {
-                    let row = data[i];
-                    let numeroSequencia = i + 1; // Fila estrita 1, 2, 3, 4...
-                    
-                    let t = parseNum(row['Tempo (s)'] || row['Tempo'] || 0);
-                    let x = parseNum(row['Aceleração X (g)'] || row['Aceleração X'] || row['Aceleraçao X (g)'] || 0);
-                    let y = parseNum(row['Aceleração Y (g)'] || row['Aceleração Y'] || row['Aceleraçao Y (g)'] || 0);
-                    let z = parseNum(row['Aceleração Z (g)'] || row['Aceleração Z'] || row['Aceleraçao Z (g)'] || 0);
-
-                    historicoLocal.indices.push(numeroSequencia);
-                    historicoLocal.tempos.push(t);
-                    historicoLocal.acelX.push(x);
-                    historicoLocal.acelY.push(y);
-                    historicoLocal.acelZ.push(z);
-
-                    if (Math.abs(z) > historicoLocal.maxZGlobal) {
-                        historicoLocal.maxZGlobal = Math.abs(z);
-                    }
-                    if (row['Status'] || row['Status Estrutural']) {
-                        historicoLocal.ultimoStatusGlobal = row['Status'] || row['Status Estrutural'];
-                    }
-                }
-            }
-
-            // Atualiza os KPIs visuais com os dados consolidados
-            document.getElementById('kpiStatus').innerText = historicoLocal.ultimoStatusGlobal;
-            document.getElementById('kpiMaxZ').innerText = historicoLocal.maxZGlobal.toFixed(4);
-            document.getElementById('kpiLeituras').innerText = historicoLocal.indices.length.toLocaleString('pt-BR');
-
-            // Renderiza o gráfico usando o índice sequencial perfeito (1, 2, 3, 4...) no eixo X
-            chartAcelInstance.data.labels = historicoLocal.indices;
-            chartAcelInstance.data.datasets[0].data = historicoLocal.acelX;
-            chartAcelInstance.data.datasets[1].data = historicoLocal.acelY;
-            chartAcelInstance.data.datasets[2].data = historicoLocal.acelZ;
-            chartAcelInstance.update('none');
-        }
-
-        function processarDadosFFT(data) {
-            let ultimaLinha = data[data.length - 1];
-            if (!ultimaLinha) return;
-            
-            let ultimoTempoFFT = ultimaLinha['Tempo (s)'] || ultimaLinha['Tempo'];
-            let frequencias = [];
-            let magnitudes = [];
-
-            data.forEach(row => {
-                if (!ultimoTempoFFT || row['Tempo (s)'] === ultimoTempoFFT || row['Tempo'] === ultimoTempoFFT) {
-                    let freq = parseNum(row['Frequência (Hz)'] || row['Frequencia (Hz)'] || row['Freq Z (Hz)'] || row['Frequência'] || row['Frequencia'] || row['Freq'] || 0);
-                    let mag = parseNum(row['Magnitude'] || row['Magnitude (g)'] || row['Mag Z (g)'] || row['Amplitude'] || row['Aceleração (g)'] || 0);
-
-                    if (freq > 0 || mag > 0) {
-                        frequencias.push(freq.toFixed(2));
-                        magnitudes.push(mag.toFixed(4));
-                    }
-                }
-            });
-
-            if (frequencias.length > 0) {
-                chartFFTInstance.data.labels = frequencias;
-                chartFFTInstance.data.datasets[0].data = magnitudes;
-                chartFFTInstance.update('none');
-            }
-        }
-
-        // Inicialização do painel
-        inicializarGraficos();
-        carregarDados();
-
-        // Consulta automática a cada 1.5 segundos
-        setInterval(carregarDados, 1500);
-    </script>
-</body>
-</html>
