@@ -150,18 +150,18 @@
         <span>⚡ PAINEL DE MONITORAMENTO ESTRUTURAL & ANÁLISE DE VIBRAÇÕES</span>
         <div class="live-indicator">
             <span class="pulse-dot"></span>
-            <span>AO VIVO (STREAMING 1S)</span>
+            <span>AO VIVO</span>
         </div>
     </div>
 
-    <!-- Campo para inserir os Links dos CSVs das Planilhas -->
+    <!-- Controles de Links CSV -->
     <div class="controls">
         <div class="input-group">
             <input type="text" id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vQJrkjhKTIPab6OUPAB8jJbrLZ4fcL1c9Hag230BqNA7WVQV9s_5Q3ILW9rdmZ43BI1pNvRsDmPpQJc/pub?gid=1183749713&single=true&output=csv" placeholder="Link do CSV da Aba de Dados...">
         </div>
         <div class="input-group">
-            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (opcional, gerado auto se vazio)...">
-            <button onclick="carregarDadosManualmente()">Forçar Atualização</button>
+            <input type="text" id="csvFftUrl" value="" placeholder="Link do CSV da Aba FFT (deixe em branco para auto-detectar)...">
+            <button onclick="carregarDadosManualmente()">Forçar Limpeza e Reinício</button>
             <span id="lastUpdate" class="status-badge">Conectando...</span>
         </div>
     </div>
@@ -177,12 +177,12 @@
             <div class="kpi-value" id="kpiMaxZ">--</div>
         </div>
         <div class="kpi-card" style="border-color: #F59E0B;">
-            <div class="kpi-title">TOTAL ACUMULADO DE LEITURAS</div>
+            <div class="kpi-title">TOTAL DE LEITURAS</div>
             <div class="kpi-value" id="kpiLeituras">0</div>
         </div>
     </div>
 
-    <!-- Seção dos Gráficos -->
+    <!-- Gráficos -->
     <div class="charts-grid">
         <div class="chart-card">
             <canvas id="chartAceleracao"></canvas>
@@ -195,23 +195,25 @@
     <script>
         let chartAcelInstance = null;
         let chartFFTInstance = null;
+        let carregandoEmAndamento = false;
+        
+        // Memória local limpa
+        let historicoLocal = {
+            indices: [],
+            tempos: [],
+            acelX: [],
+            acelY: [],
+            acelZ: [],
+            maxZGlobal: 0,
+            ultimoStatusGlobal: "Normal"
+        };
 
-        // Filas e dados em buffer para processamento contínuo item por item
-        let dadosPendentes = [];
-        let totalLeiturasAcumuladas = 0;
-        let maxZGlobal = 0;
-        let ultimoStatusGlobal = "Normal";
-
-        let tamanhoUltimaLeituraFFT = 0;
-
-        // Converte strings numéricas com ponto ou vírgula
         function parseNum(val) {
             if (typeof val === 'number') return val;
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.')) || 0;
         }
 
-        // Inicialização dos gráficos
         function inicializarGraficos() {
             const ctxAcel = document.getElementById('chartAceleracao').getContext('2d');
             chartAcelInstance = new Chart(ctxAcel, {
@@ -228,49 +230,9 @@
                     responsive: true,
                     animation: false,
                     plugins: {
-                        title: { display: true, text: '1. Tendência Temporal de Aceleração (Eixos X, Y, Z)', color: '#F8FAFC' },
+                        title: { display: true, text: '1. Tendência Temporal de Aceleração (X, Y, Z)', color: '#F8FAFC' },
                         legend: { labels: { color: '#CBD5E1' } }
                     },
                     scales: {
                         x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
-                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
-                    }
-                }
-            });
-
-            const ctxFFT = document.getElementById('chartFFT').getContext('2d');
-            chartFFTInstance = new Chart(ctxFFT, {
-                type: 'bar',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Magnitude (g)',
-                        data: [],
-                        backgroundColor: '#8B5CF6'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    animation: false,
-                    plugins: {
-                        title: { display: true, text: '2. Espectro de Frequência (Aba FFT)', color: '#F8FAFC' },
-                        legend: { display: false }
-                    },
-                    scales: {
-                        x: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } },
-                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#334155' } }
-                    }
-                }
-            });
-        }
-
-        function carregarDadosManualmente() {
-            dadosPendentes = []; // Limpa fila atual para recarregar do zero
-            carregarDadosCSV();
-        }
-
-        function carregarDadosCSV() {
-            let url = document.getElementById('csvUrl').value.trim();
-            if (!url) return;
-
-            if (url.includes('pubhtml')) {
+                        y: { ticks: { color: '#CBD5E1' }, grid: { color: '#
